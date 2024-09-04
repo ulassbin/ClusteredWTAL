@@ -26,7 +26,7 @@ def plot_silhouette_scores(silhouette_per_cluster, i):
     #plt.show()
 
 
-def elbow_and_silhoutte(data, max_clusters=10):
+def elbow_and_silhoutte(data, max_clusters=10, visualize=False):
     start_time = time.time()
     inertia = []
     for k in range(2, max_clusters + 1):
@@ -34,14 +34,16 @@ def elbow_and_silhoutte(data, max_clusters=10):
         labels = kmeans.fit_predict(data)
         inertia.append(kmeans.inertia_)
         sil = average_silhouette_scores_per_cluster(data, labels)
-        plot_silhouette_scores(sil, k)
+        if(visualize):
+            plot_silhouette_scores(sil, k)
     end_time = time.time()
     duration = end_time - start_time
-    print(f"Analysus Calculation took {duration:.2f} seconds to execute.")   
-    plt.figure(figsize=(8, 5))
-    plt.plot(range(2, max_clusters + 1), inertia, 'bx-')
-    plt.xlabel('Number of clusters')
-    plt.ylabel('Inertia')
-    plt.title('Elbow Method for Optimal k')
-    plt.show()
+    print(f"Analysis Calculation took {duration:.2f} seconds to execute.")
+    if(visualize):
+        plt.figure(figsize=(8, 5))
+        plt.plot(range(2, max_clusters + 1), inertia, 'bx-')
+        plt.xlabel('Number of clusters')
+        plt.ylabel('Inertia')
+        plt.title('Elbow Method for Optimal k')
+        plt.show()
 
