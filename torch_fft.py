@@ -2,9 +2,16 @@ import torch
 import os
 import random
 import numpy as np
+import time
+def print_memory_usage(message=""):
+    """Print GPU memory usage."""
+    allocated = torch.cuda.memory_allocated() / (1024 ** 2)
+    reserved = torch.cuda.memory_reserved() / (1024 ** 2)
+    print(f"{message} - Allocated: {allocated:.2f} MB, Reserved: {reserved:.2f} MB")
 
 # Function to load videos
 def load_videos(data_dir, num_videos=None):
+    print_memory_usage('Before loading videos')
     video_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.npy')]
     
     # Limit the number of videos if specified
@@ -12,6 +19,7 @@ def load_videos(data_dir, num_videos=None):
         video_files = random.sample(video_files, num_videos)
     
     videos = [torch.tensor(np.load(file)) for file in video_files]
+    print_memory_usage('After loading videos')
     return videos
 
 # Function to normalize a batch of video sequences
@@ -64,7 +72,7 @@ def fft_distance_2d_batch(video_batch1, video_batch2):
 def cdist_fft_2d_batched(videos, batch_size=32):
     num_videos = len(videos)
     distance_matrix = torch.zeros((num_videos, num_videos), device=videos[0].device)
-
+    print_memory_usage('After Forming Matrix')
     for i in range(num_videos):
         # Prepare batches for parallel processing
         for j in range(i + 1, num_videos, batch_size):
@@ -78,11 +86,18 @@ def cdist_fft_2d_batched(videos, batch_size=32):
             # Update the distance matrix
             distance_matrix[i, j:end] = distances
             distance_matrix[j:end, i] = distances  # Symmetric matrix
-
+        #del batch_videos_j, batch_videos_i, distances
+        torch.cuda.empty_cache()
+        print_memory_usage('{} Iteration'.format(i))
     return distance_matrix
 
-def cuda_fft_distances(data_dir, num_videos):
+def cuda_fft_distances(data_dir, num_videos, batch=32):
     videos = load_videos(data_dir, num_videos)
     videos = [video.to('cuda') for video in videos]  # Move videos to GPU
-    distance_matrix = cdist_fft_2d_batched(videos, batch_size=32)
+    print_memory_usage('Moved video to Gpu')
+    distance_matrix = cdist_fft_2d_batched(videos, batch_size=batch)
+    print_memory_usage('After Calculating Distance Matrix')
+    time.sleep(2)
+    torch.cuda.empty_cache()
+    print_memory_usage('Emptied cache')
     return distance_matrix.to('cpu').numpy()

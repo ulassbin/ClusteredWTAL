@@ -4,6 +4,11 @@ import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
 import time
 
+def getClusters(data, K):
+    # Perform K means
+    kmeans = KMeans(n_clusters=K, random_state=0)
+    labels = kmeans.fit_predict(data)
+
 def average_silhouette_scores_per_cluster(data, labels):
     silhouette_vals = silhouette_samples(data, labels)
     unique_labels = np.unique(labels)
