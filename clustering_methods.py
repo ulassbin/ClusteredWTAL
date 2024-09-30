@@ -59,15 +59,28 @@ def visualize_clusters_with_pca(data, labels, title="DBSCAN Clustering", method=
     - method: 'pca' or 'tsne' for dimensionality reduction
     """
     # Flatten the data from (samples, 300, 1024) to (samples, 300 * 1024)
-    flattened_data = data.reshape(data.shape[0], -1)
+    print('Data size ', data.shape)
+    flattened_data = data
+    #flattened_data = data.reshape(data.shape[0], -1)
     
     # Apply dimensionality reduction (PCA or t-SNE)
     if method == 'pca':
         reducer = PCA(n_components=2)  # Reduce to 2 dimensions
         reduced_data = reducer.fit_transform(flattened_data)
     elif method == 'tsne':
-        reducer = TSNE(n_components=2, random_state=0)
-        reduced_data = reducer.fit_transform(flattened_data)
+        # First PCA in temporal dimension, then TSNE IN REST
+        data_shortened = np.zeros((data.shape[0],10,1024))
+        reducer = PCA(n_components=10)
+        for i in range(len(data)):
+            vid = data[i].reshape(1024,-1)
+            print('Vid shape', vid.shape)
+            reduced_data = reducer.fit_transform(vid)
+            data_shortened[i] = reduced_data.reshape(-1,1024)
+            print('data shape', data_shortened[i].shape)
+        data_shortened = data_shortened.reshape(-1, 10*1024)
+        perplexity_value = min(30, len(data_shortened) - 1)  # Ensure perplexity < n_samples
+        reducer = TSNE(n_components=2, perplexity=perplexity_value, random_state=0)
+        reduced_data = reducer.fit_transform(data_shortened)
     else:
         raise ValueError("Unknown method: use 'pca' or 'tsne'")
     

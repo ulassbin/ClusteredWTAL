@@ -120,9 +120,9 @@ def normalize(video_batch):
 
 def fft_distance_2d_batch(video_batch1, video_batch2):
     # Normalize the video batches
-    video_batch1 = torch.tanh(video_batch1)
-    video_batch2 = torch.tanh(video_batch2)
-
+    video_batch1 = torch.tanh(normalize(video_batch1))
+    video_batch2 = torch.tanh(normalize(video_batch2))
+    print_memory_usage('After tanh')
     # Get the size of each batch
     n1, d1 = video_batch1.shape[1], video_batch1.shape[2]
     n2, d2 = video_batch2.shape[1], video_batch2.shape[2]
@@ -134,11 +134,16 @@ def fft_distance_2d_batch(video_batch1, video_batch2):
     pad_n = n1 + n2 - 1
 
     # Apply 2D FFT across the entire video (frames, features)
-    fft_video1 = torch.fft.fft2(video_batch1, s=(pad_n, d1))
-    fft_video2 = torch.fft.fft2(video_batch2, s=(pad_n, d1))
+    video_batch1 = torch.fft.fft2(video_batch1, s=(pad_n, d1))
+    print_memory_usage('After fft1')
+    torch.cuda.empty_cache()
+    video_batch2 = torch.fft.fft2(video_batch2, s=(pad_n, d1))
+    print_memory_usage('After fft2')
+    torch.cuda.empty_cache()
 
     # Element-wise multiplication in frequency domain and summation over feature dimension
-    fft_mult = torch.fft.ifft2(fft_video1 * torch.conj(fft_video2))
+    fft_mult = torch.fft.ifft2(video_batch1 * torch.conj(video_batch2))
+    print_memory_usage('After IFFT2')
     print("convolution_result shape before sum", fft_mult.shape)
     convolution_result = torch.real(fft_mult).mean(dim=2)  # Taking mean over feature dimension
     print("convolution_result shape ", convolution_result.shape)
@@ -160,8 +165,10 @@ def cdist_fft_2d_batched(videos, batch_size=32):
             # Prepare batches for parallel processing
             for j in range(i + 1, num_videos, batch_size):
                 end = min(j + batch_size, num_videos)
-                batch_videos_j = videos[j:end]  # Pad videos in the batch
-                batch_videos_i = videos[i].unsqueeze(0).expand(end - j,  -1, -1)
+                print_memory_usage('Before forming batches {},{}'.format(i,j))
+                batch_videos_j = videos[j:end].to('cuda')  # Pad videos in the batch
+                batch_videos_i = videos[i].unsqueeze(0).expand(end - j,  -1, -1).to('cuda')
+                print_memory_usage('After Forming batches {},{}'.format(i,j))
                 print("Type of batch_videos {} and {}".format(type(batch_videos_i), type(batch_videos_j)))
                 print("Shapes of videos {} and {}".format(batch_videos_i.shape, batch_videos_j.shape))
                 # Compute distances for the batch
@@ -178,7 +185,9 @@ def cdist_fft_2d_batched(videos, batch_size=32):
 def cuda_fft_distances(videos, feature_size, batch=32):
     # Videos shape is, (#num_videos, max_lenxfeature_dim)
     num_videos = len(videos)
-    videos = torch.from_numpy(videos.reshape(num_videos,-1,feature_dim)).float().to('cuda')  # Move videos to GPU
+    print_memory_usage('Before tensors')
+    videos = torch.from_numpy(videos.reshape(num_videos,-1,feature_dim)).float()  # Move videos to GPU
+    print_memory_usage('After Converting to Tensor')
     print('Moved video to Gpu, videos type', type(videos))
     distance_matrix = cdist_fft_2d_batched(videos, batch_size=batch)
     print_memory_usage('After Calculating Distance Matrix')
