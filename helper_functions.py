@@ -168,8 +168,8 @@ def normalize(video_batch):
 
 def fft_distance_2d_batch(video_batch1, video_batch2):
     # Normalize the video batches
-    video_batch1 = (video_batch1)
-    video_batch2 = (video_batch2)
+    video_batch1 = F.normalize(video_batch1, dim=2)
+    video_batch2 = F.normalize(video_batch2, dim=2)
     #video_batch2 = torch.roll(video_batch1, shifts=100, dims=1)  # Circular shift along temporal dimension (dim=1) to test
 
     # Get the size of each batch
@@ -192,7 +192,7 @@ def fft_distance_2d_batch(video_batch1, video_batch2):
 
     # Element-wise multiplication in frequency domain and summation over feature dimension
     fft_mult = torch.fft.ifft2(video_batch1_fft * torch.conj(video_batch2_fft), dim=1)
-    convolution_result = torch.real(fft_mult).amax(dim=2)  # Sum over feature dimension
+    convolution_result = torch.real(fft_mult).sum(dim=2)  # Sum over feature dimension
 
     # Peak value in the convolution result for each pair (across temporal dimension)
     #helperLogger.log("Data shape {}".format(video_batch1.shape))
