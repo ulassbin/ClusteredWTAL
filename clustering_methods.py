@@ -1,25 +1,31 @@
 from sklearn.cluster import DBSCAN
 from sklearn.cluster import AffinityPropagation
 from sklearn.mixture import GaussianMixture
-import matplotlib.pyplot as plt
-import numpy as np
-
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
+
+import matplotlib.pyplot as plt
+import numpy as np
+import random
+
+
+from logger import logging, CustomLogger
+
+clmLogger = CustomLogger('clm')
 
 def print_memory_usage(message=""):
     """Print GPU memory usage."""
     allocated = torch.cuda.memory_allocated() / (1024 ** 2)
     reserved = torch.cuda.memory_reserved() / (1024 ** 2)
-    print(f"{message} - Allocated: {allocated:.2f} MB, Reserved: {reserved:.2f} MB")
+    clmLogger.log(f"{message} - Allocated: {allocated:.2f} MB, Reserved: {reserved:.2f} MB")
 
 
 def getClusterCenters(data, labels, custom_distance):
     unique_labels = np.unique(labels)
-    print("unique_labels ", unique_labels)
+    clmLogger.log("unique_labels {}".format(unique_labels))
     medoid_indexes = []
     for label in unique_labels:
-        print("------LABEL ",label)
+        clmLogger.log("------LABEL {}".format(label))
         cluster_indexes = np.where(labels == label)[0]
         cluster_data = data[cluster_indexes]
         num_points = cluster_data.shape[0]
@@ -28,17 +34,17 @@ def getClusterCenters(data, labels, custom_distance):
         for i in range(num_points):
             for j in range(i+1, num_points):
                 distance = custom_distance(cluster_data[i], cluster_data[j])
-                print('Distance between {} and {} is {}'.format(i, j, distance))
+                clmLogger.log('Distance between {} and {} is {}'.format(i, j, distance))
                 distance_matrix[i, j] = distance
                 distance_matrix[j, i] = distance  # Symmetric matrix
         total_distances = np.sum(distance_matrix, axis=1)
         medoid_index = np.argmin(total_distances)
-        print("medoid_index", medoid_index)
+        clmLogger.log("medoid_index {}".format(medoid_index))
         final_index = cluster_indexes[medoid_index]
         medoid_indexes.append(final_index)
 
     medoid_indexes = np.array(medoid_indexes)
-    print('Medoid indexes ', medoid_indexes)
+    clmLogger.log('Medoid indexes {}'.format(medoid_indexes))
     return medoid_indexes, data[medoid_indexes]
 
 def visualize_distance_matrix(distance_matrix):
@@ -59,7 +65,7 @@ def visualize_clusters_with_pca(data, labels, title="DBSCAN Clustering", method=
     - method: 'pca' or 'tsne' for dimensionality reduction
     """
     # Flatten the data from (samples, 300, 1024) to (samples, 300 * 1024)
-    print('Data size ', data.shape)
+    clmLogger.log('Data size {}'.format(data.shape))
     flattened_data = data
     #flattened_data = data.reshape(data.shape[0], -1)
     
@@ -73,10 +79,8 @@ def visualize_clusters_with_pca(data, labels, title="DBSCAN Clustering", method=
         reducer = PCA(n_components=10)
         for i in range(len(data)):
             vid = data[i].reshape(1024,-1)
-            print('Vid shape', vid.shape)
             reduced_data = reducer.fit_transform(vid)
             data_shortened[i] = reduced_data.reshape(-1,1024)
-            print('data shape', data_shortened[i].shape)
         data_shortened = data_shortened.reshape(-1, 10*1024)
         perplexity_value = min(30, len(data_shortened) - 1)  # Ensure perplexity < n_samples
         reducer = TSNE(n_components=2, perplexity=perplexity_value, random_state=0)
@@ -109,7 +113,7 @@ def DBSCAN_clustering(data):
 	# NO ACTUAL CLUSTER CENTERS...
 	# DBSCAN clustering
 	clustering = DBSCAN(eps=3, min_samples=2).fit(X)
-	print(clustering.labels_)  # -1 indicates noise points
+	clmLogger.log(clustering.labels_)  # -1 indicates noise points
 	return clustering
 
 def custom_affinitypropagation(data, distance_matrix):
@@ -121,8 +125,8 @@ def custom_affinitypropagation(data, distance_matrix):
     clustering = AffinityPropagation(verbose=True, affinity='precomputed').fit(similarity_matrix)
     
     # Output number of clusters and cluster labels
-    print("Number of clusters:", len(set(clustering.labels_)))
-    print("Cluster labels:", clustering.labels_)
+    clmLogger.log("Number of clusters: {}".format(len(set(clustering.labels_))))
+    clmLogger.log("Cluster labels: {}".format(clustering.labels_))
     
     return clustering.labels_, clustering.cluster_centers_indices_, data[clustering.cluster_centers_indices_]
 
@@ -140,7 +144,7 @@ def GMM(data):
 	        lowest_bic = bic
 	        best_gmm = gmm
 
-	print("Best number of components:", best_gmm.n_components)
+	clmLogger.log("Best number of components: {}".format(best_gmm.n_components))
 	return best_gmm
 
 def custom_dbscan(X, eps=0.1, min_samples=2, custom_distance_func=None):
@@ -199,19 +203,79 @@ def visualize_clusters(data, labels, title="DBSCAN Clustering"):
 
 
 
+def k_medoids(distance_matrix, k, max_iter=100):
+    """
+    k-medoids clustering algorithm with precomputed distance matrix.
+    
+    Parameters:
+    - distance_matrix: Precomputed distance matrix (n x n).
+    - k: Number of clusters (medoids).
+    - max_iter: Maximum number of iterations.
+    
+    Returns:
+    - medoids: Final medoids' indices.
+    - labels: Cluster labels for each point.
+    """
+    n = distance_matrix.shape[0]  # Number of data points
+    
+    # Step 1: Initialize k medoids randomly
+    medoids = random.sample(range(n), k)
+    
+    # Function to assign each point to the nearest medoid
+    def assign_labels(medoids):
+        labels = np.argmin(distance_matrix[:, medoids], axis=1)
+        return labels
+    
+    # Step 2: Assign each point to the nearest medoid
+    labels = assign_labels(medoids)
+    
+    # Step 3: Iteratively update the medoids
+    for _ in range(max_iter):
+        new_medoids = medoids.copy()
+        
+        # Try to update each medoid
+        for i in range(k):
+            cluster_indices = np.where(labels == i)[0]  # Points assigned to the i-th medoid
+            if len(cluster_indices) == 0:
+                continue
+                
+            # Find the point in the cluster with the minimum total distance to all other points in the cluster
+            min_total_distance = np.inf
+            best_medoid = medoids[i]
+            
+            for candidate in cluster_indices:
+                total_distance = np.sum(distance_matrix[candidate, cluster_indices])
+                if total_distance < min_total_distance:
+                    min_total_distance = total_distance
+                    best_medoid = candidate
+            
+            new_medoids[i] = best_medoid
+        
+        # Step 4: Check for convergence (medoids do not change)
+        if np.array_equal(medoids, new_medoids):
+            break
+        
+        medoids = new_medoids
+        labels = assign_labels(medoids)
+    
+    return medoids, labels
+
+
+
+
 if __name__=="__main__":
 	# Example data - Simple function testing.
 	X = np.array([[1, 2], [2, 2], [2, 3], [8, 7], [8, 8], [25, 80]])
 
 	X= np.random.rand(100,2)
 
-	print(X[0])
+	clmLogger.log(X[0])
 	cluster = DBSCAN_clustering(X)
 
 	cluster2_labels = custom_dbscan(X, 3, 2, custom_manhattan_distance)
 
-	print("Cluster1 labels:", cluster.labels_)
-	print("Cluster2 labels:", cluster2_labels)
+	clmLogger.log("Cluster1 labels: {}".format(cluster.labels_))
+	clmLogger.log("Cluster2 labels: {}".format(cluster2_labels))
 
 
 	visualize_clusters(X, cluster2_labels, "Custom DBSCAN")
