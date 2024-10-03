@@ -101,7 +101,8 @@ def load_videos(data_dir, num_videos=None):
 data_dir = '/home/ulas/Documents/Datasets/CoLA/data/THUMOS14/features/test/rgb'
 load_labels = False
 cluster_method='kmedoids'
-num_videos = 100
+num_videos = None
+distance_comp_batch = 10 # 30
 # Load the videos (specify the number of videos to load, or None to load all)
 videos, feature_dim, lengths = load_videos(data_dir, num_videos)
 helper.feature_dim = feature_dim
@@ -116,14 +117,14 @@ else:
     if(cluster_method == 'DBSCAN'):
         labels = clm.custom_dbscan(videos, eps=0.5*1e-4, min_samples=2, custom_distance_func=helper.fft_distance_2d)
     elif(cluster_method == 'kmedoids'):
-        distance_matrix = helper.cuda_fft_distances(videos, feature_dim, 10) # Second param is batch
+        distance_matrix = helper.cuda_fft_distances(videos, feature_dim, distance_comp_batch) # Second param is batch
         clm.visualize_distance_matrix(distance_matrix)
         cluster_center_indexes, labels = clm.k_medoids(distance_matrix, k=10, max_iter = 200) 
         #visualize_distance_heatmap(distance_matrix, labels, title="Distance Matrix Heatmap")
         visualize_clustering_heatmap(distance_matrix, labels, title="Clustering Heatmap")
         cluster_centers = videos[cluster_center_indexes]
     else: # Distance Precomputed method!
-        distance_matrix = helper.cuda_fft_distances(videos, feature_dim, 10) # Second param is batch
+        distance_matrix = helper.cuda_fft_distances(videos, feature_dim, distance_comp_batch) # Second param is batch
         clm.visualize_distance_matrix(distance_matrix)
         labels, cluster_center_indexes, cluster_centers = clm.custom_affinitypropagation(videos, distance_matrix) # We can do better in precomputation hg
     np.save('cluster_labels.npy',labels)

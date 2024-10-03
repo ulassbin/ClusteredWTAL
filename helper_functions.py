@@ -6,6 +6,8 @@ import torch
 import numpy as np
 import time
 import matplotlib.pyplot as plt
+import torch.nn.functional as F
+import math
 
 from logger import logging, CustomLogger
 
@@ -63,44 +65,6 @@ def fft_distance_2d(video1, video2):
     return distance
 
 
-def fft_distance_2d_with_pose(video1, video2):
-    # Normalize the videos
-    video1 = np.tanh(video1.reshape(-1,feature_dim)) # Tanh is quite necessary here!
-    video2 = np.tanh(video2.reshape(-1,feature_dim))
-
-    helperLogger.log("Values of 1 feature max {}, mean {}, min {}".format(np.max(video1[0]), np.mean(video1[0]), np.min(video1[0])))
-
-    # Get the size of each video
-    n1, d1 = video1.shape
-    n2, d2 = video2.shape
-
-    # Determine padding size (maximum of dimensions)
-    pad_n = n1 + n2 - 1
-    pad_d = max(d1, d2)
-
-    # Apply 2D FFT with padding to the next largest size
-    fft_video1 = np.fft.fft2(video1, s=(pad_n, pad_d))
-    fft_video2 = np.fft.fft2(video2, s=(pad_n, pad_d))
-
-    # Element-wise multiplication in frequency domain
-    fft_mult = fft_video1 * np.conj(fft_video2)
-
-    # Compute the inverse 2D FFT to get the convolution result
-    convolution_result = np.fft.ifft2(fft_mult)
-    convolution_result = np.real(convolution_result)
-
-    # Peak value in the convolution result
-    helperLogger.log('Conv result ', convolution_result.shape)
-    convolution_result = np.mean(convolution_result, axis=1)
-    peak_value = np.max(convolution_result)
-    print('Convolution len {}, peak {}, min {}, mean{}'.format(convolution_result.shape, peak_value, np.min(convolution_result), np.mean(convolution_result)))
-    index = np.where(peak_value)[0]
-    # Distance as the inverse of peak value (to ensure similarity yields a small distance)
-    distance = 1 / (peak_value + 1e-10)  # Add small value to avoid division by zero
-    return distance, index
-
-
-
 
 # Function to compute the distance matrix for a list of videos
 def comp_cdist_fft_2d(videos):
@@ -119,14 +83,94 @@ def comp_cdist_fft_2d(videos):
 # --- Batched computations below
 
 
+def circular_cosine_similarity(video_batch1, video_batch2):
+    """
+    Computes the cosine similarity between two video batches at all possible circular shifts.
+    
+    Parameters:
+    - video_batch1: Tensor of shape [batch, time, feature]
+    - video_batch2: Tensor of shape [batch, time, feature], shifted version of video_batch1
+    
+    Returns:
+    - result: Tensor of shape [batch, time], containing the summed cosine similarity for each circular shift.
+    """
+    # Ensure both batches have the same shape
+    assert video_batch1.shape == video_batch2.shape, "Both video batches must have the same shape"
+    
+    batch_size, time_dim, feature_dim = video_batch1.shape
+    
+    # Normalize both video batches along the feature dimension (cosine similarity normalization)
+    video_batch1_norm = F.normalize(video_batch1, dim=2)
+    video_batch2_norm = F.normalize(video_batch2, dim=2)
+
+    # Initialize a tensor to store the cosine similarity results for all shifts
+    result = torch.zeros((batch_size, time_dim))  # [batch, time] for circular shifts
+    
+    # Compute cosine similarity at each circular shift
+    for shift in range(time_dim):  # Shift range from 0 to time_dim-1
+        # Circular shift video_batch2 by the current shift amount
+        shifted_video_batch2 = torch.roll(video_batch2_norm, shifts=shift, dims=1)
+
+        # Compute cosine similarity over the feature dimension
+        cosine_sim = torch.sum(video_batch1_norm * shifted_video_batch2, dim=2)  # [batch, time]
+
+        # Sum over all time steps for the current shift
+        result[:, shift] = cosine_sim.sum(dim=1)  # Summing over time steps
+
+    return result
+
+def plot_comparison(convolution_result, shifted_sum_result):
+    num_plots = convolution_result.shape[0]  # Number of subplots (same as the batch size)
+
+    # Determine the number of rows and columns to make the plot layout roughly square
+    num_cols = math.ceil(math.sqrt(num_plots))  # Number of columns
+    num_rows = math.ceil(num_plots / num_cols)  # Number of rows
+
+    # Set up the figure and adaptive subplots
+    fig, axes = plt.subplots(num_rows, num_cols, figsize=(15, 10))  # Adjust the size as needed
+
+    # Flatten axes in case of multi-dimensional axes array for easier access
+    axes = axes.flatten()
+
+    # Loop over each batch index and plot corresponding FFT and shifted sum results in a separate subplot
+    for i in range(num_plots):
+        ax = axes[i]  # Get the corresponding axis for the current plot
+
+        # Plot FFT result
+        ax.plot(convolution_result[i].cpu().numpy(), label=f'FFT Result {i+1}', color='b')
+
+        # Plot Shifted Sum result
+        ax.plot(shifted_sum_result[i].cpu().numpy(), label=f'ShiftedSum Result {i+1}', color='r', linestyle='--')
+
+        # Set labels and title
+        ax.set_xlabel('X-axis (Time)')
+        ax.set_ylabel('Y-axis (Values)')
+        ax.set_title(f'Comparison for Index {i+1}')
+
+        # Add legend for each subplot
+        ax.legend()
+
+    # Remove any unused axes (in case num_plots isn't a perfect square)
+    for j in range(i + 1, len(axes)):
+        fig.delaxes(axes[j])
+
+    # Adjust layout to avoid overlapping subplots
+    plt.tight_layout()
+
+    # Display the plot
+    plt.show()
+
+
+
 # Function to normalize a batch of video sequences
 def normalize(video_batch):
     return (video_batch - video_batch.mean(dim=(1,2), keepdim=True)) / video_batch.std(dim=(1,2), keepdim=True)
 
 def fft_distance_2d_batch(video_batch1, video_batch2):
     # Normalize the video batches
-    video_batch1 = torch.softmax((video_batch1), dim=2)
-    video_batch2 = torch.softmax((video_batch2), dim=2)
+    video_batch1 = (video_batch1)
+    video_batch2 = (video_batch2)
+    #video_batch2 = torch.roll(video_batch1, shifts=100, dims=1)  # Circular shift along temporal dimension (dim=1) to test
 
     # Get the size of each batch
     n1, d1 = video_batch1.shape[1], video_batch1.shape[2]
@@ -141,25 +185,30 @@ def fft_distance_2d_batch(video_batch1, video_batch2):
     # Apply 2D FFT across the entire video batch (frames, features)
     # Apply padding in the temporal dimension (pad_n) but keep feature dimension (d1) the same
     video_batch1_fft = torch.fft.fft2(video_batch1, dim=1)
-    torch.cuda.empty_cache()
+    #torch.cuda.empty_cache()
     
     video_batch2_fft = torch.fft.fft2(video_batch2, dim=1)
-    torch.cuda.empty_cache()
+    #torch.cuda.empty_cache()
 
     # Element-wise multiplication in frequency domain and summation over feature dimension
     fft_mult = torch.fft.ifft2(video_batch1_fft * torch.conj(video_batch2_fft), dim=1)
-    convolution_result = torch.real(fft_mult).sum(dim=2)  # Sum over feature dimension
+    convolution_result = torch.real(fft_mult).amax(dim=2)  # Sum over feature dimension
 
     # Peak value in the convolution result for each pair (across temporal dimension)
-    helperLogger.log("Data shape {}".format(video_batch1.shape))
-    helperLogger.log("Convolution result shape  {}".format(convolution_result.shape))
+    #helperLogger.log("Data shape {}".format(video_batch1.shape))
+    #helperLogger.log("Convolution result shape  {}".format(convolution_result.shape))
+    convolution_result2 = circular_cosine_similarity(video_batch1, video_batch2)
+
+    plot_comparison(convolution_result, convolution_result2)
+
     for i in range(convolution_result.shape[0]):
-        plt.plot(convolution_result[i].cpu().numpy(), label=f'Line {i+1}')
-    
+        plt.plot(convolution_result[i].cpu().numpy(), label=f'FFT Result {i+1}')
+    for i in range(convolution_result2.shape[0]):
+        plt.plot(convolution_result2[i].cpu().numpy(), label=f'ShiftedSumResult {i+1}')
     # Add labels and title
     plt.xlabel('X-axis (Time)')
     plt.ylabel('Y-axis (Values)')
-    plt.title('10 Lines from [10, 5527] Data')
+    plt.title('Convolution with a single Data')
     
     # Optionally add a legend
     plt.legend()
