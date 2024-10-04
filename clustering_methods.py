@@ -7,7 +7,9 @@ from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 import numpy as np
 import random
+import torch
 
+feature_dim = 2048
 
 from logger import logging, CustomLogger
 
@@ -20,32 +22,64 @@ def print_memory_usage(message=""):
     clmLogger.log(f"{message} - Allocated: {allocated:.2f} MB, Reserved: {reserved:.2f} MB")
 
 
-def getClusterCenters(data, labels, custom_distance):
+def getClusterCenters(data, labels, batch_size, custom_distance):
     unique_labels = np.unique(labels)
     clmLogger.log("unique_labels {}".format(unique_labels))
     medoid_indexes = []
-    for label in unique_labels:
-        clmLogger.log("------LABEL {}".format(label))
-        cluster_indexes = np.where(labels == label)[0]
-        cluster_data = data[cluster_indexes]
-        num_points = cluster_data.shape[0]
-        # Calculate distance matrix (upper triangle since direction doesn't matter)
-        distance_matrix = np.zeros((num_points, num_points))
-        for i in range(num_points):
-            for j in range(i+1, num_points):
-                distance = custom_distance(cluster_data[i], cluster_data[j])
-                clmLogger.log('Distance between {} and {} is {}'.format(i, j, distance))
-                distance_matrix[i, j] = distance
-                distance_matrix[j, i] = distance  # Symmetric matrix
-        total_distances = np.sum(distance_matrix, axis=1)
-        medoid_index = np.argmin(total_distances)
-        clmLogger.log("medoid_index {}".format(medoid_index))
-        final_index = cluster_indexes[medoid_index]
-        medoid_indexes.append(final_index)
+    with torch.no_grad():
+        for label in unique_labels:
+            clmLogger.log("------LABEL {}".format(label))
+            cluster_indexes = np.where(labels == label)[0]
+            cluster_blob = data[cluster_indexes]
+            num_points = cluster_blob.shape[0]
+            print('Cluster blob initial shape ', cluster_blob.shape)
+            cluster_blob = torch.from_numpy(data[cluster_indexes].reshape(num_points,-1,feature_dim)).float() 
+            print('Cluster blob shape 2 ', cluster_blob.shape)
 
+            # Calculate distance matrix (upper triangle since direction doesn't matter)
+            distance_matrix = np.zeros((num_points, num_points))
+            for i in range(num_points):
+                for j in range(i+1, num_points, batch_size):
+                    end = min(j+batch_size, num_points)
+                    batch_videos_j = cluster_blob[j:end].to('cuda')
+                    batch_videos_i = cluster_blob[i].unsqueeze(0).expand(end-j, -1, -1).to('cuda')
+                    distance = custom_distance(batch_videos_i, batch_videos_j).cpu().numpy()
+                    distance_matrix[i, j:end] = distance
+                    distance_matrix[j:end, i] = distance  # Symmetric matrix
+            total_distances = np.sum(distance_matrix, axis=1)
+            medoid_index = np.argmin(total_distances)
+            clmLogger.log("medoid_index {}".format(medoid_index))
+            final_index = cluster_indexes[medoid_index]
+            medoid_indexes.append(final_index)
     medoid_indexes = np.array(medoid_indexes)
     clmLogger.log('Medoid indexes {}'.format(medoid_indexes))
     return medoid_indexes, data[medoid_indexes]
+
+def getClusterCentersWDistance(data, labels, precomp_distance):
+    unique_labels = np.unique(labels)
+    clmLogger.log("unique_labels {}".format(unique_labels))
+    medoid_indexes = []
+    with torch.no_grad():
+        for label in unique_labels:
+            clmLogger.log("------LABEL {}".format(label))
+            cluster_indexes = np.where(labels == label)[0]
+            cluster_blob = data[cluster_indexes]
+            num_points = cluster_data.shape[0]
+            distance_matrix = np.zeros((num_points, num_points))
+            for i in range(num_points):
+                for j in range(i+1, num_points):
+                    distance_matrix[i,j] = precomp_distance[cluster_indexes[i], cluster_indexes[j]]
+            total_distances = np.sum(distance_matrix, axis=1)
+            medoid_index = np.argmin(total_distances)
+            clmLogger.log("medoid_index {}".format(medoid_index))
+            final_index = cluster_indexes[medoid_index]
+            medoid_indexes.append(final_index)
+    medoid_indexes = np.array(medoid_indexes)
+    clmLogger.log('Medoid indexes {}'.format(medoid_indexes))
+    return medoid_indexes, data[medoid_indexes]
+
+
+
 
 def visualize_distance_matrix(distance_matrix):
     plt.imshow(distance_matrix, cmap='viridis', interpolation='nearest')

@@ -34,36 +34,38 @@ def normalize(video):
 # Function to calculate the FFT-based distance between two videos using 2D FFT
 def fft_distance_2d(video1, video2):
     # Normalize the videos
-    video1 = np.tanh(video1.reshape(-1,feature_dim)) # old version normalize(video1.reshape(-1,feature_dim))
-    video2 = np.tanh(video2.reshape(-1,feature_dim))
+    video1 = torch.tensor(video1.reshape(-1, feature_dim))
+    video2 = torch.tensor(video2.reshape(-1, feature_dim))
+    video1 = F.normalize(video1, dim=1) # old version normalize(video1.reshape(-1,feature_dim))
+    video2 = F.normalize(video2, dim=1)
 
-    # Get the size of each video
-    n1, d1 = video1.shape
-    n2, d2 = video2.shape
+    n1, d1 = video1.shape[0], video1.shape[1]
+    n2, d2 = video2.shape[0], video2.shape[1]
 
-    # Determine padding size (maximum of dimensions)
-    pad_n = n1 + n2 - 1
-    pad_d = max(d1, d2)
+    # Ensure the feature dimension is the same
+    assert d1 == d2, "Feature dimensions must match."
 
-    # Apply 2D FFT with padding to the next largest size
-    fft_video1 = np.fft.fft2(video1, s=(pad_n, pad_d))
-    fft_video2 = np.fft.fft2(video2, s=(pad_n, pad_d))
+    # Determine padding size (sum of temporal dimensions - 1)
+    pad_n = n1  # This is the padding size for the temporal dimension
 
-    # Element-wise multiplication in frequency domain
-    fft_mult = fft_video1 * np.conj(fft_video2)
+    video1_fft = torch.fft.fft2(video1, dim=0)
+    #torch.cuda.empty_cache()
+    
+    video2_fft = torch.fft.fft2(video2, dim=0)
+    #torch.cuda.empty_cache()
 
-    # Compute the inverse 2D FFT to get the convolution result
-    convolution_result = np.fft.ifft2(fft_mult)
-    convolution_result = np.real(convolution_result)
+    # Element-wise multiplication in frequency domain and summation over feature dimension
+    fft_mult = torch.fft.ifft2(video1_fft * torch.conj(video2_fft), dim=0)
+    convolution_result = torch.real(fft_mult).sum(dim=1)  # Sum over feature dimension
 
-    convolution_result = np.mean(convolution_result, axis=1) # Get the mean overlapping axis
-    # Peak value in the convolution result
-    peak_value = np.max(convolution_result)
+
+    #print("convolution_result shape ", convolution_result.shape)
+    # Peak value in the convolution result for each pair (across temporal dimension)
+    peak_values = torch.amax(convolution_result)
 
     # Distance as the inverse of peak value (to ensure similarity yields a small distance)
-    distance = 1 / (peak_value + 1e-10)  # Add small value to avoid division by zero
-    return distance
-
+    distances = 1 / (peak_values + 1e-10)  # Add small value to avoid division by zero
+    return distances
 
 
 # Function to compute the distance matrix for a list of videos
@@ -197,25 +199,20 @@ def fft_distance_2d_batch(video_batch1, video_batch2):
     # Peak value in the convolution result for each pair (across temporal dimension)
     #helperLogger.log("Data shape {}".format(video_batch1.shape))
     #helperLogger.log("Convolution result shape  {}".format(convolution_result.shape))
-    convolution_result2 = circular_cosine_similarity(video_batch1, video_batch2)
 
-    plot_comparison(convolution_result, convolution_result2)
-
-    for i in range(convolution_result.shape[0]):
-        plt.plot(convolution_result[i].cpu().numpy(), label=f'FFT Result {i+1}')
-    for i in range(convolution_result2.shape[0]):
-        plt.plot(convolution_result2[i].cpu().numpy(), label=f'ShiftedSumResult {i+1}')
-    # Add labels and title
-    plt.xlabel('X-axis (Time)')
-    plt.ylabel('Y-axis (Values)')
-    plt.title('Convolution with a single Data')
+    # for i in range(convolution_result.shape[0]):
+    #     plt.plot(convolution_result[i].cpu().numpy(), label=f'FFT Result {i+1}')
+    # # Add labels and title
+    # plt.xlabel('X-axis (Time)')
+    # plt.ylabel('Y-axis (Values)')
+    # plt.title('Convolution with a single Data')
     
-    # Optionally add a legend
-    plt.legend()
+    # # Optionally add a legend
+    # plt.legend()
     
-    # Display the plot
-    plt.tight_layout()
-    plt.show()
+    # # Display the plot
+    # plt.tight_layout()
+    # plt.show()
 
 
     #print("convolution_result shape ", convolution_result.shape)

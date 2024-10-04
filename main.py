@@ -99,20 +99,25 @@ def load_videos(data_dir, num_videos=None):
 
 # --- Config ---
 data_dir = '/home/ulas/Documents/Datasets/CoLA/data/THUMOS14/features/test/rgb'
-load_labels = False
-cluster_method='kmedoids'
+load_labels = True
+cluster_method='affinity'
 num_videos = None
-distance_comp_batch = 10 # 30
+distance_comp_batch = 30 # 30
 # Load the videos (specify the number of videos to load, or None to load all)
 videos, feature_dim, lengths = load_videos(data_dir, num_videos)
-helper.feature_dim = feature_dim
+helper.feature_dim = clm.feature_dim = feature_dim
 
 plt.plot(lengths)
 plt.show()
 mainLogger.log("Videos shape {}, {}, features {}".format(len(videos), videos.shape, feature_dim), logging.WARNING)
 cluster_centers = None
 if(load_labels):
-    labels = np.load('cluster_labels.npy')    
+    if (os.path.exists('cluster_labels.npy')):
+        labels = np.load('cluster_labels.npy')
+    if (os.path.exists('cluster_centers.npy')):    
+        cluster_centers = np.load('cluster_centers')
+    if(os.path.exists('cluster_center_indexes.npy')):    
+        cluster_centers = np.load('cluster_center_indexes.npy')
 else:
     if(cluster_method == 'DBSCAN'):
         labels = clm.custom_dbscan(videos, eps=0.5*1e-4, min_samples=2, custom_distance_func=helper.fft_distance_2d)
@@ -132,7 +137,9 @@ else:
 # Visualize the clusters using PCA
 clm.visualize_clusters_with_pca(videos, labels, title=cluster_method, method='tsne')
 
-if(len(cluster_centers) == 0):
-    cluster_center_indexes, cluster_centers = clm.getClusterCenters(videos, labels) 
+if(cluster_centers == None):
+    cluster_center_indexes, cluster_centers = clm.getClusterCenters(videos, labels, distance_comp_batch,  helper.fft_distance_2d_batch) 
+    np.save('cluster_centers.npy', cluster_centers)
+    np.save('cluster_center_indexes.npy', cluster_center_indexes)
 
 mainLogger.log("From {} videos Cluster indexes are {}".format(len(videos), cluster_center_indexes))
