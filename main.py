@@ -12,6 +12,7 @@ from logger import logging, CustomLogger
 import clustering_methods as clm
 import cluster_analysis as analysis
 import helper_functions as helper
+import data_loader as loader
 import torch_fft
 
 mainLogger = CustomLogger(name='main')
@@ -84,19 +85,6 @@ def visualize_clustering_heatmap(distance_matrix, labels, title="Clustering Heat
 
 
 
-def load_videos(data_dir, num_videos=None):
-    video_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.npy')]
-    feature_dim = np.load(video_files[0]).shape[1]
-    # Limit the number of videos if specified
-    if num_videos is not None and num_videos < len(video_files):
-        video_files = random.sample(video_files, num_videos)
-    videos = [np.load(file) for file in video_files] # Flatten is necessary for DBSCAN
-    lengths = [video.shape[0] for video in videos]
-    max_len = max(lengths)
-    padded_videos = np.array([np.pad(video, ((0, max_len - video.shape[0]), (0, 0)), 'constant').flatten() for video in videos])
-    mainLogger.log("Max len is {}".format(max_len))
-    return padded_videos, feature_dim, lengths
-
 # --- Config ---
 data_dir = '/home/ulas/Documents/Datasets/CoLA/data/THUMOS14/features/test/rgb'
 load_labels = True
@@ -104,7 +92,7 @@ cluster_method='affinity'
 num_videos = None
 distance_comp_batch = 30 # 30
 # Load the videos (specify the number of videos to load, or None to load all)
-videos, feature_dim, lengths = load_videos(data_dir, num_videos)
+videos, feature_dim, lengths = loader.load_videos(data_dir, num_videos)
 helper.feature_dim = clm.feature_dim = feature_dim
 
 plt.plot(lengths)
@@ -112,12 +100,7 @@ plt.show()
 mainLogger.log("Videos shape {}, {}, features {}".format(len(videos), videos.shape, feature_dim), logging.WARNING)
 cluster_centers = None
 if(load_labels):
-    if (os.path.exists('cluster_labels.npy')):
-        labels = np.load('cluster_labels.npy')
-    if (os.path.exists('cluster_centers.npy')):    
-        cluster_centers = np.load('cluster_centers')
-    if(os.path.exists('cluster_center_indexes.npy')):    
-        cluster_centers = np.load('cluster_center_indexes.npy')
+    labels, cluster_centers, cluster_center_indexes = loader.load_cluster_information()
 else:
     if(cluster_method == 'DBSCAN'):
         labels = clm.custom_dbscan(videos, eps=0.5*1e-4, min_samples=2, custom_distance_func=helper.fft_distance_2d)

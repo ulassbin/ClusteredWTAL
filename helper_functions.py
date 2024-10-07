@@ -12,6 +12,7 @@ import math
 from logger import logging, CustomLogger
 
 helperLogger = CustomLogger('helper')
+full_conv = False
 
 feature_dim = 2048
 
@@ -61,10 +62,12 @@ def fft_distance_2d(video1, video2):
 
     #print("convolution_result shape ", convolution_result.shape)
     # Peak value in the convolution result for each pair (across temporal dimension)
-    peak_values = torch.amax(convolution_result)
-
-    # Distance as the inverse of peak value (to ensure similarity yields a small distance)
-    distances = 1 / (peak_values + 1e-10)  # Add small value to avoid division by zero
+    if(not full_conv):
+        peak_values = torch.amax(convolution_result)
+        # Distance as the inverse of peak value (to ensure similarity yields a small distance)
+        distances = 1 / (peak_values + 1e-10)  # Add small value to avoid division by zero
+    else:
+        distances = 1 / (convolution_result + 1e-10)  # Add small value to avoid division by zero    
     return distances
 
 
