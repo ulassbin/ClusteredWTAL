@@ -108,6 +108,76 @@ class ClusterFusion(nn.Module):
 
 
 
+
+class TransformerClusterFusion(nn.Module):
+    def __init__(self, cfg, cluster_centers):
+        super(TransformerClusterFusion, self).__init__()
+        self.temporal_length = cfg.temporal_length
+        self.feature_dim = cfg.feature_dim
+        self.num_cluster_centers = cluster_centers.shape[0]
+        self.scale = nn.Parameter(torch.ones(1))  # Learnable scale parameter
+        self.cluster_centers = cluster_centers  # Shape: (num_cluster_centers, temporal_length, feature_dim)
+
+        # Transformer Encoder Layer
+        self.transformer_encoder_layer = nn.TransformerEncoderLayer(
+            d_model=cfg.feature_dim,
+            nhead=8,  # Number of attention heads
+            dim_feedforward=2048,
+            dropout=0.1,
+            batch_first=True
+        )
+        self.transformer_encoder = nn.TransformerEncoder(self.transformer_encoder_layer, num_layers=4)
+
+        # Linear layer to project information after transformer
+        self.projection = nn.Linear(cfg.feature_dim, cfg.feature_dim)
+
+    def transformerFuse(self, x, cluster_distances):
+        """
+        Args:
+            x: Input video feature tensor of shape (batch_size, temporal_length, feature_dim).
+            cluster_distances: Tensor representing the distances between each video feature and cluster centers,
+                               of shape (batch_size, temporal_length, num_cluster_centers).
+        Returns:
+            Fused feature tensor of shape (batch_size, temporal_length, feature_dim).
+        """
+        batch_size, temporal_length, feature_dim = x.shape
+        num_cluster_centers, _, _ = self.cluster_centers.shape
+
+        # Step 1: Normalize the cluster distances
+        dist_norm = F.normalize(cluster_distances, dim=(1, 2))
+        # dist_norm shape: (batch_size, temporal_length, num_cluster_centers)
+
+        # Step 2: Expand cluster_centers for batch compatibility
+        cluster_centers_expanded = self.cluster_centers.unsqueeze(0)  # Shape: (1, num_cluster_centers, temporal_length, feature_dim)
+        cluster_centers_expanded = cluster_centers_expanded.expand(batch_size, -1, -1, -1)
+        # cluster_centers_expanded shape: (batch_size, num_cluster_centers, temporal_length, feature_dim)
+
+        # Step 3: Expand dist_norm for broadcasting
+        dist_norm_expanded = dist_norm.unsqueeze(-1)  # Shape: (batch_size, temporal_length, num_cluster_centers, 1)
+        dist_norm_expanded = dist_norm_expanded.permute(0, 2, 1, 3)
+        # dist_norm_expanded shape: (batch_size, num_cluster_centers, temporal_length, 1)
+
+        # Step 4: Calculate weighted information
+        information = dist_norm_expanded * cluster_centers_expanded
+        # information shape: (batch_size, num_cluster_centers, temporal_length, feature_dim)
+
+        # Step 5: Sum information over cluster centers
+        aggregated_information = information.sum(dim=1)  # Shape: (batch_size, temporal_length, feature_dim)
+
+        # Step 6: Concatenate x and aggregated information for transformer input
+        fused_input = x + self.scale.view(1, 1, -1) * aggregated_information
+        # fused_input shape: (batch_size, temporal_length, feature_dim)
+
+        # Step 7: Pass through Transformer Encoder
+        transformer_output = self.transformer_encoder(fused_input)  # Shape: (batch_size, temporal_length, feature_dim)
+
+        # Step 8: Project the transformer output back to original feature dimension
+        fused_data = self.projection(transformer_output)  # Shape: (batch_size, temporal_length, feature_dim)
+
+        return fused_data
+
+
+
 class CrashingVids(nn.Module):
     def __init__(self, cfg):
         super(CrashingVids, self).__init__()
