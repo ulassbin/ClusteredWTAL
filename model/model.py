@@ -38,35 +38,15 @@ class Simple_Actionness_Module(nn.Module):
         actionness = cas.sum(dim=2)
         return embeddings, cas, actionness
 
-
-class ClusterModule(nn.Module):
-    def __init__(self, cluster_data, cfg):
-        super(ClusterModule, self).__init__()
-        self.full_distance = cfg.distance
-        self.clusters = cluster_data
-        self.full_conv = cfg.full_conv
-
-    def forward(self, x):
-        # Full conv distance (#xBatch, #clusterCenters, #temporalLength)
-        # Peak conv distance (#xBatch, #clusterCenters, 1)
-        distances = []
-        helper.full_conv = self.full_conv
-        for center in cluster_data:
-            dist = helper.fft_distance_2d(x) # Change this to batched.
-            distances.append(dist)
-        return distances
-
-
-
 class ClusterFusion(nn.Module):
     # After computing the full convolutions, we want to affect 
     def __init__(self, cfg, cluster_centers):
         super(ClusterFusion, self).__init__()
-        self.full_conv = cfg.full_conv
-        self.temporal_length = cfg.temporal_length
-        self.feature_dim = cfg.feature_dim
-        self.scale = nn.Parameter(torch.ones(1)) # Learnable scale parameters
-        self.cluster_centers = cluster_centers # This is similar vectors with x.
+        self.temporal_length = cfg.TEMPORAL_LENGTH
+        self.feature_dim = cfg.FEATS_DIM
+        self.num_cluster = cluster_centers.shape[0]
+        self.scale = nn.Parameter(torch.ones(1)).to('cuda') # Learnable scale parameters
+        self.cluster_centers = cluster_centers.view(self.num_cluster, self.temporal_length, -1) # This is similar vectors with x.
         # cluster_centers shape (#clustercenters, #temporalLength, #featureDimension)
         # Cluster distances shape (#batch, #temporalLength, #clusterCenters)
         # X(batched videos) shape (#batch, #temporalLength, #featureDimension)
@@ -94,20 +74,33 @@ class ClusterFusion(nn.Module):
         return fused_data
 
 
+    def compute_distances(self, x, cluster_centers):
+        helper.full_conv = True
+        batch_size, temporal_length, feature_dim = x.shape  # (batch_size, temporal_length, feature_dim)
+        centers, cent_length, cent_feature_dim = cluster_centers.shape  # (centers, temporal_length, feature_dim)
 
-    def forward(x, cluster_distances):
-        # Cluster distances shape (#xBatch, #temporalLength, #clusterCenters)
-        # X(batched videos) shape (#xBatch, #temporalLength, #featureDimension)
-        # Cluster distances are convolutions - time frame shift based similarities of X vectors of videos from
-        # cluster centers. If cluster distances are of an x item is small for time =t and center =1. It is the most 
-        # corresponding video when x is shifted t time steps and overlapped with clustercenter =1 
+        # Ensure that the temporal and feature dimensions of x and cluster centers match
+        assert temporal_length == cent_length, "Temporal lengths must match between x and cluster centers."
+        assert feature_dim == cent_feature_dim, "Feature dimensions must match between x and cluster centers."
 
-        # Use attention based similarity if possible, how to incorporate this distances to fuse to X vectors,
-        # While keeping dimension
-        return 0
+        # Expand x to (batch_size * centers, temporal_length, feature_dim)
+        x_expanded = x.unsqueeze(1).expand(batch_size, centers, temporal_length, feature_dim).reshape(-1, temporal_length, feature_dim)
 
+        # Expand cluster_centers to (batch_size * centers, temporal_length, feature_dim)
+        cluster_centers_expanded = cluster_centers.unsqueeze(0).expand(batch_size, centers, temporal_length, feature_dim).reshape(-1, temporal_length, feature_dim)
 
+        # Compute distances using fft_distance_2d_batch; the result will be (batch_size * centers, temporal_length)
+        distances_expanded = helper.fft_distance_2d_batch(x_expanded, cluster_centers_expanded)  # Shape: (batch_size * centers, temporal_length)
 
+        # Reshape the distances to (batch_size, centers, temporal_length) and then transpose to (batch_size, temporal_length, centers)
+        distances = distances_expanded.view(batch_size, centers, temporal_length).permute(0, 2, 1).to('cuda')  # Shape: (batch_size, temporal_length, centers)
+
+        return distances
+
+    def forward(self, x):
+        distances = self.compute_distances(x, self.cluster_centers)
+        print("X {}, distances {}".format(x.device, distances.device))
+        return self.easyFuse(x, distances), distances
 
 class TransformerClusterFusion(nn.Module):
     def __init__(self, cfg, cluster_centers):
@@ -115,7 +108,7 @@ class TransformerClusterFusion(nn.Module):
         self.temporal_length = cfg.temporal_length
         self.feature_dim = cfg.feature_dim
         self.num_cluster_centers = cluster_centers.shape[0]
-        self.scale = nn.Parameter(torch.ones(1))  # Learnable scale parameter
+        self.scale = nn.Parameter(torch.ones(1)).to('cuda')  # Learnable scale parameter
         self.cluster_centers = cluster_centers  # Shape: (num_cluster_centers, temporal_length, feature_dim)
 
         # Transformer Encoder Layer
@@ -176,144 +169,45 @@ class TransformerClusterFusion(nn.Module):
 
         return fused_data
 
-
-
 class CrashingVids(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, cfg, temporal_length, cluster_centers):
         super(CrashingVids, self).__init__()
-        self.len_feature = cfg.FEATS_DIM
-        self.num_classes = cfg.NUM_CLASSES
-
-        self.actionness_module = Simple_Actionness_Module(cfg.FEATS_DIM, cfg.NUM_CLASSES)
+        cfg.TEMPORAL_LENGTH = temporal_length
+        self.temporal_length = cfg.TEMPORAL_LENGTH
+        self.feature_dim = cfg.FEATS_DIM
+        self.scale = nn.Parameter(torch.ones(1)) # Learnable scale parameters
+        self.cluster_centers = cluster_centers # This is similar vectors with x.
 
         self.softmax = nn.Softmax(dim=1)
-        self.softmax_2 = nn.Softmax(dim=2)
+        self.actionness_module = Simple_Actionness_Module(cfg.FEATS_DIM, cfg.NUM_CLASSES).to('cuda') # TransformerClusterFusion
+        self.cluster_fusion_module = ClusterFusion(cfg, cluster_centers).to('cuda')
+    
+    def get_video_cls_scores(self, cas, filtered=None):
+        # If no filtered indexes are provided, use the full temporal length
+        if filtered is None:
+            filtered = torch.arange(cas.size(1), device=cas.device)  # Full range of temporal length
 
-    def loadClusters():
-        pass
-    def getClusterDistance(x):
-        dist = 0
-        return dist
-    def select_topk_embeddings(self, scores, embeddings, k):
-        _, idx_DESC = scores.sort(descending=True, dim=1)
-        idx_topk = idx_DESC[:, :k]
-        idx_topk = idx_topk.unsqueeze(2).expand([-1, -1, embeddings.shape[2]])
-        selected_embeddings = torch.gather(embeddings, 1, idx_topk)
-        return selected_embeddings
-
-    def easy_snippets_mining(self, actionness, embeddings, k_easy):
-        select_idx = torch.ones_like(actionness).cuda()
-        select_idx = self.dropout(select_idx)
-
-        actionness_drop = actionness * select_idx
-
-        actionness_rev = torch.max(actionness, dim=1, keepdim=True)[0] - actionness
-        actionness_rev_drop = actionness_rev * select_idx
-
-        easy_act = self.select_topk_embeddings(actionness_drop, embeddings, k_easy)
-        easy_bkg = self.select_topk_embeddings(actionness_rev_drop, embeddings, k_easy)
-
-        return easy_act, easy_bkg
-
-    def hard_snippets_mining(self, actionness, embeddings, k_hard):
-        aness_np = actionness.cpu().detach().numpy()
-        aness_median = np.median(aness_np, 1, keepdims=True)
-        aness_bin = np.where(aness_np > aness_median, 1.0, 0.0)
-
-        erosion_M = ndimage.binary_erosion(aness_bin, structure=np.ones((1,self.M))).astype(aness_np.dtype)
-        erosion_m = ndimage.binary_erosion(aness_bin, structure=np.ones((1,self.m))).astype(aness_np.dtype)
-        idx_region_inner = actionness.new_tensor(erosion_m - erosion_M)
-        aness_region_inner = actionness * idx_region_inner
-        hard_act = self.select_topk_embeddings(aness_region_inner, embeddings, k_hard)
-
-        dilation_m = ndimage.binary_dilation(aness_bin, structure=np.ones((1,self.m))).astype(aness_np.dtype)
-        dilation_M = ndimage.binary_dilation(aness_bin, structure=np.ones((1,self.M))).astype(aness_np.dtype)
-        idx_region_outer = actionness.new_tensor(dilation_M - dilation_m)
-        aness_region_outer = actionness * idx_region_outer
-        hard_bkg = self.select_topk_embeddings(aness_region_outer, embeddings, k_hard)
-
-        return hard_act, hard_bkg
-
-    def get_video_cls_scores(self, cas, k_easy):
-        sorted_scores, _= cas.sort(descending=True, dim=1)
-        topk_scores = sorted_scores[:, :k_easy, :]
-        video_scores = self.softmax(topk_scores.mean(1))
+        filtered_cas = cas[:, filtered, :]  # Shape: (batch_size, filtered_length, num_classes)
+        avg_scores = filtered_cas.mean(dim=1)  # Shape: (batch_size, num_classes)
+        video_scores = self.softmax(avg_scores)
         return video_scores
 
+
     def forward(self, x):
-        num_segments = x.shape[1]
-        k_easy = num_segments // self.r_easy
-        k_hard = num_segments // self.r_hard
-        embeddings, cas, actionness = self.actionness_module(x)
+        print('X shape ', x.shape)
+        x = x.reshape(-1,self.temporal_length, self.feature_dim)
+        batch_size, temporal_length, feature_dim = x.shape
 
-        easy_act, easy_bkg = self.easy_snippets_mining(actionness, embeddings, k_easy)
-        hard_act, hard_bkg = self.hard_snippets_mining(actionness, embeddings, k_hard)
-        
-        video_scores = self.get_video_cls_scores(cas, k_easy)
+        x_fused, distances = self.cluster_fusion_module(x)
+        print('X fused is ', type(x_fused), ' Shape is ', x_fused.shape)
+        embeddings, cas, actionness = self.actionness_module(x_fused)
+        base_embed, base_cas, base_actionnes = self.actionness_module(x)
 
-        contrast_pairs = {
-            'EA': easy_act,
-            'EB': easy_bkg,
-            'HA': hard_act,
-            'HB': hard_bkg
-        }
-
-        return video_scores, contrast_pairs, actionness, cas
+        video_scores = self.get_video_cls_scores(cas)
+        base_vid_scores = self.get_video_cls_scores(base_cas)
+        return video_scores, actionness, cas, base_vid_scores, base_actionnes, base_cas
 
 
+if __name__=="__main__":
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-def RSKP_PredictionModule(self, x):
-    # normalization
-    norms_x = calculate_l1_norm(x)
-    norms_ac = calculate_l1_norm(self.ac_center)
-    norms_fg = calculate_l1_norm(self.fg_center)
-
-    # generate class scores
-    frm_scrs = torch.einsum('ntd,cd->ntc', [norms_x, norms_ac]) * self.scale_factor
-    frm_fb_scrs = torch.einsum('ntd,kd->ntk', [norms_x, norms_fg]).squeeze(-1) * self.scale_factor
-
-    # generate attention
-    class_agno_att = self.sigmoid(frm_fb_scrs)
-    class_wise_att = self.sigmoid(frm_scrs)
-    class_agno_norm_att = class_agno_att / (torch.sum(class_agno_att, dim=1, keepdim=True) + 1e-5)
-    class_wise_norm_att = class_wise_att / (torch.sum(class_wise_att, dim=1, keepdim=True) + 1e-5)
-
-    ca_vid_feat = torch.einsum('ntd,nt->nd', [x, class_agno_norm_att])
-    cw_vid_feat = torch.einsum('ntd,ntc->ncd', [x, class_wise_norm_att])
-
-    # normalization
-    norms_ca_vid_feat = calculate_l1_norm(ca_vid_feat)
-    norms_cw_vid_feat = calculate_l1_norm(cw_vid_feat)
-
-    # classification
-    frm_scr = torch.einsum('ntd,cd->ntc', [norms_x, norms_ac]) * self.scale_factor
-    ca_vid_scr = torch.einsum('nd,cd->nc', [norms_ca_vid_feat, norms_ac]) * self.scale_factor
-    cw_vid_scr = torch.einsum('ncd,cd->nc', [norms_cw_vid_feat, norms_ac]) * self.scale_factor
-
-    # prediction
-    ca_vid_pred = F.softmax(ca_vid_scr, -1)
-    cw_vid_pred = F.softmax(cw_vid_scr, -1)
-
-    return ca_vid_pred, cw_vid_pred, class_agno_att, frm_scr
+    ModelMain = CrashingVids(cfg, cluster_centers)

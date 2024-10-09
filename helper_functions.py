@@ -8,6 +8,7 @@ import time
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
 import math
+import copy
 
 from logger import logging, CustomLogger
 
@@ -218,12 +219,12 @@ def fft_distance_2d_batch(video_batch1, video_batch2):
     # plt.show()
 
 
-    #print("convolution_result shape ", convolution_result.shape)
-    # Peak value in the convolution result for each pair (across temporal dimension)
-    peak_values = torch.amax(convolution_result)
-
-    # Distance as the inverse of peak value (to ensure similarity yields a small distance)
-    distances = 1 / (peak_values + 1e-10)  # Add small value to avoid division by zero
+    if(not full_conv):
+        peak_values = torch.amax(convolution_result)
+        # Distance as the inverse of peak value (to ensure similarity yields a small distance)
+        distances = 1 / (peak_values + 1e-10)  # Add small value to avoid division by zero
+    else:
+        distances = 1 / (convolution_result + 1e-10)  # Add small value to avoid division by zero    
     return distances
 
 # Function to compute the distance matrix for a list of videos with batching
@@ -231,6 +232,8 @@ def cdist_fft_2d_batched(videos, batch_size=32):
     num_videos = len(videos)
     distance_matrix = torch.zeros((num_videos, num_videos), device=videos[0].device)
     #print_memory_usage('After Forming Matrix')
+    prev = copy.deepcopy(full_conv)
+    full_conv = False
     with torch.no_grad():
         for i in range(num_videos):
             # Prepare batches for parallel processing
@@ -251,6 +254,7 @@ def cdist_fft_2d_batched(videos, batch_size=32):
             #del batch_videos_j, batch_videos_i, distances
             torch.cuda.empty_cache()
             print_memory_usage('{} Iteration'.format(i))
+    full_conv = prev
     return distance_matrix
 
 def cuda_fft_distances(videos, feature_size, batch=32):

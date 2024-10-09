@@ -14,16 +14,18 @@ def load_videos(data_dir, num_videos=None):
     max_len = max(lengths)
     padded_videos = np.array([np.pad(video, ((0, max_len - video.shape[0]), (0, 0)), 'constant').flatten() for video in videos])
     logger.log("Max len is {}".format(max_len))
-    return padded_videos, feature_dim, lengths
+    return padded_videos, feature_dim, lengths, max_len
 
 def load_distance_matrix():
 	pass
 
-def load_cluster_information():
-    if (os.path.exists('cluster_labels.npy')):
-        labels = np.load('cluster_labels.npy')
-    if (os.path.exists('cluster_centers.npy')):    
-        cluster_centers = np.load('cluster_centers.npy')
-    if(os.path.exists('cluster_center_indexes.npy')):    
-        cluster_center_indexes = np.load('cluster_center_indexes.npy')
+def load_cluster_information(base_path):
+    labels = cluster_centers = cluster_center_indexes = None
+    print('{}/cluster_labels.npy'.format(base_path))
+    if (os.path.exists('{}/cluster_labels.npy'.format(base_path))):
+        labels = np.load('{}/cluster_labels.npy'.format(base_path))
+    if (os.path.exists('{}/cluster_centers.npy'.format(base_path))):    
+        cluster_centers = np.load('{}/cluster_centers.npy'.format(base_path))
+    if(os.path.exists('{}/cluster_center_indexes.npy'.format(base_path))):    
+        cluster_center_indexes = np.load('{}/cluster_center_indexes.npy'.format(base_path))
     return labels, cluster_centers, cluster_center_indexes

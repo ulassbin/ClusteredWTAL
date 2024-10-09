@@ -13,12 +13,8 @@ print('Ran!')
 dist_func = helper.fft_distance_2d
 dist_func_batch = helper.fft_distance_2d_batch
 
-
-
-
 # Config ---
 data_dir = '/home/ulas/Documents/Datasets/CoLA/data/THUMOS14/features/test/rgb'
-
 
 videos, feature_dim, length = loader.load_videos(data_dir)
 
