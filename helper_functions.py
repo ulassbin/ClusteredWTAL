@@ -271,3 +271,27 @@ def cuda_fft_distances(videos, feature_size, batch=32):
     torch.cuda.empty_cache()
     print_memory_usage('Emptied cache')
     return distance_matrix.to('cpu').numpy()
+
+
+
+def compute_cluster_distances(x, cluster_centers):
+    batch_size, temporal_length, feature_dim = x.shape  # (batch_size, temporal_length, feature_dim)
+    centers, cent_length, cent_feature_dim = cluster_centers.shape  # (centers, temporal_length, feature_dim)
+
+    # Ensure that the temporal and feature dimensions of x and cluster centers match
+    assert temporal_length == cent_length, "Temporal lengths must match between x and cluster centers."
+    assert feature_dim == cent_feature_dim, "Feature dimensions must match between x and cluster centers."
+
+    # Expand x to (batch_size * centers, temporal_length, feature_dim)
+    x_expanded = x.unsqueeze(1).expand(batch_size, centers, temporal_length, feature_dim).reshape(-1, temporal_length, feature_dim)
+
+    # Expand cluster_centers to (batch_size * centers, temporal_length, feature_dim)
+    cluster_centers_expanded = cluster_centers.unsqueeze(0).expand(batch_size, centers, temporal_length, feature_dim).reshape(-1, temporal_length, feature_dim)
+
+    # Compute distances using fft_distance_2d_batch; the result will be (batch_size * centers, temporal_length)
+    distances_expanded = fft_distance_2d_batch(x_expanded, cluster_centers_expanded)  # Shape: (batch_size * centers, temporal_length)
+
+    # Reshape the distances to (batch_size, centers, temporal_length) and then transpose to (batch_size, temporal_length, centers)
+    distances = distances_expanded.view(batch_size, centers, temporal_length).permute(0, 2, 1).to('cuda')  # Shape: (batch_size, temporal_length, centers)
+
+    return distances
