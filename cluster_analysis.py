@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
 import time
+import random
 
 def getClusters(data, K):
     # Perform K means

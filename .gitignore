@@ -1,0 +1,17 @@
+# Ignore .npy files
+*.npy
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+
+# Ignore log files
+*.log
+
+# Ignore temporary files or test directories
+#temp_test/
+
+# Ignore results folder if you don’t want to track outputs
+Results/
+data/
+temp_test/
