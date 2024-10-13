@@ -275,7 +275,7 @@ def compute_cluster_distances(x, cluster_centers):
     centers, cent_length, cent_feature_dim = cluster_centers.shape  # (centers, temporal_length, feature_dim)
 
     # Ensure that the temporal and feature dimensions of x and cluster centers match
-    print('Temporal length {} , centroid length {}'.format(temporal_length, cent_length))
+    #print('Temporal length {} , centroid length {}'.format(temporal_length, cent_length))
     assert temporal_length == cent_length, "Temporal lengths must match between x and cluster centers."
     assert feature_dim == cent_feature_dim, "Feature dimensions must match between x and cluster centers."
 

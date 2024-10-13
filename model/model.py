@@ -76,8 +76,9 @@ class ClusterFusion(nn.Module):
 
     def forward(self, x):
         helper.full_conv = True
+        #print("X {} centers {}".format(x.device, self.cluster_centers.device))
         distances = helper.compute_cluster_distances(x, self.cluster_centers)
-        print("X {}, distances {}".format(x.device, distances.device))
+        #print("X {}, distances {}".format(x.device, distances.device))
         return self.fuse(x, distances), distances
 
 class TransformerClusterFusion(nn.Module):
@@ -180,12 +181,12 @@ class CrashingVids(nn.Module):
 
 
     def forward(self, x):
-        print('X shape ', x.shape)
+        #print('X shape {}, temp {}, feature_dim {}'.format( x.shape,self.temporal_length, self.feature_dim))
         x = x.reshape(-1,self.temporal_length, self.feature_dim)
         batch_size, temporal_length, feature_dim = x.shape
-
+        #print("X device crashingvids {}".format(x.device))
         x_fused, distances = self.cluster_fusion_module(x)
-        print('X fused is ', type(x_fused), ' Shape is ', x_fused.shape)
+        #print('X fused is ', type(x_fused), ' Shape is ', x_fused.shape)
         embeddings, cas, actionness = self.actionness_module(x_fused)
         base_embed, base_cas, base_actionnes = self.actionness_module(x)
 

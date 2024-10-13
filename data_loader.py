@@ -107,7 +107,7 @@ class NpyFeature(data.Dataset):
             elif self.sampling == 'uniform':
                 sample_idx = self.uniform_sampling(rgb_feature.shape[0])
             else:
-                raise AssertionError('Not supported sampling !')
+                sample_idx = no_noise(rgb_feature.shape[0])
 
             rgb_feature = rgb_feature[sample_idx]
             flow_feature = flow_feature[sample_idx]
@@ -115,22 +115,23 @@ class NpyFeature(data.Dataset):
         else:
             feature = np.load(os.path.join(self.feature_path,
                                     vid_name + '.npy')).astype(np.float32)
-            # Padding for max_len
-            logger.log('Feature shape {}, len {}'.format(feature.shape, len(feature)))
-            feature = np.pad(feature, ((0, self.max_len - len(feature)), (0, 0)), mode='constant')
-            logger.log('Feature Padde {}, len {}'.format(feature.shape, len(feature)))
+            
             vid_num_seg = feature.shape[0]
 
-            if self.sampling == 'random':
+            if self.sampling == 'random': # Temporal noise addition...
                 sample_idx = self.random_perturb(feature.shape[0])
             elif self.sampling == 'uniform':
                 sample_idx = self.uniform_sampling(feature.shape[0])
             else:
-                raise AssertionError('Not supported sampling !')
+                sample_idx = self.no_noise(feature.shape[0])
+
 
             feature = feature[sample_idx]
-
-        return torch.from_numpy(feature), vid_num_seg, sample_idx
+        
+        feature = np.pad(feature, ((0, self.max_len - len(feature)), (0, 0)), mode='constant')
+        feature_torch = torch.from_numpy(feature)
+        #logger.log("Feature final shape {}".format(feature_torch.shape), logging.WARNING)
+        return feature_torch, vid_num_seg, sample_idx
 
     def get_label(self, index, vid_num_seg, sample_idx):
         vid_name = self.vid_list[index]
@@ -165,6 +166,15 @@ class NpyFeature(data.Dataset):
             temp_anno = temp_anno[sample_idx, :]
 
             return label, torch.from_numpy(temp_anno)
+
+    def no_noise(self, length):
+        if self.num_segments == length:
+            return np.arange(self.num_segments).astype(int)
+        
+        # Return evenly spaced samples without perturbation
+        samples = np.arange(self.num_segments) * length / self.num_segments
+        samples = np.floor(samples).astype(int)  # Simply round down the calculated indexes
+        return samples
 
 
     def random_perturb(self, length):
