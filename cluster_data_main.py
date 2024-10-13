@@ -86,13 +86,15 @@ def visualize_clustering_heatmap(distance_matrix, labels, title="Clustering Heat
 
 
 # --- Config ---
-data_dir = '/home/ulas/Documents/Datasets/CoLA/data/THUMOS14/features/test/rgb'
-load_labels = True
+data_dir = '/home/ulas/Documents/Datasets/CoLA/data/THUMOS14/features/train/rgb'
+cluster_dir = './data'
+load_labels = False
 cluster_method='affinity'
 num_videos = None
 distance_comp_batch = 30 # 30
 # Load the videos (specify the number of videos to load, or None to load all)
-videos, feature_dim, lengths = loader.load_videos(data_dir, num_videos)
+simple_loader = loader.simpleLoader(data_dir, cluster_dir)
+videos, feature_dim, lengths, filenames = simple_loader.load_videos()
 helper.feature_dim = clm.feature_dim = feature_dim
 
 plt.plot(lengths)
@@ -115,14 +117,15 @@ else:
         distance_matrix = helper.cuda_fft_distances(videos, feature_dim, distance_comp_batch) # Second param is batch
         clm.visualize_distance_matrix(distance_matrix)
         labels, cluster_center_indexes, cluster_centers = clm.custom_affinitypropagation(videos, distance_matrix) # We can do better in precomputation hg
-    np.save('cluster_labels.npy',labels)
+    np.save('data/cluster_labels.npy',labels)
 
 # Visualize the clusters using PCA
 clm.visualize_clusters_with_pca(videos, labels, title=cluster_method, method='tsne')
 
-if(cluster_centers == None):
+if(cluster_centers is None or len(cluster_centers) == 0):
     cluster_center_indexes, cluster_centers = clm.getClusterCenters(videos, labels, distance_comp_batch,  helper.fft_distance_2d_batch) 
-    np.save('cluster_centers.npy', cluster_centers)
-    np.save('cluster_center_indexes.npy', cluster_center_indexes)
+
+np.save('data/cluster_centers.npy', cluster_centers)
+np.save('data/cluster_center_indexes.npy', cluster_center_indexes)
 
 mainLogger.log("From {} videos Cluster indexes are {}".format(len(videos), cluster_center_indexes))

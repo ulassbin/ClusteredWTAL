@@ -13,7 +13,6 @@ import copy
 from logger import logging, CustomLogger
 
 helperLogger = CustomLogger('helper')
-full_conv = False
 
 feature_dim = 2048
 
@@ -34,7 +33,7 @@ def normalize(video):
 
 
 # Function to calculate the FFT-based distance between two videos using 2D FFT
-def fft_distance_2d(video1, video2):
+def fft_distance_2d(video1, video2, full_conv = True):
     # Normalize the videos
     video1 = torch.tensor(video1.reshape(-1, feature_dim))
     video2 = torch.tensor(video2.reshape(-1, feature_dim))
@@ -172,7 +171,7 @@ def plot_comparison(convolution_result, shifted_sum_result):
 def normalize(video_batch):
     return (video_batch - video_batch.mean(dim=(1,2), keepdim=True)) / video_batch.std(dim=(1,2), keepdim=True)
 
-def fft_distance_2d_batch(video_batch1, video_batch2):
+def fft_distance_2d_batch(video_batch1, video_batch2, full_conv=True):
     # Normalize the video batches
     video_batch1 = F.normalize(video_batch1, dim=2)
     video_batch2 = F.normalize(video_batch2, dim=2)
@@ -228,12 +227,10 @@ def fft_distance_2d_batch(video_batch1, video_batch2):
     return distances
 
 # Function to compute the distance matrix for a list of videos with batching
-def cdist_fft_2d_batched(videos, batch_size=32):
+def cdist_fft_2d_batched(videos, batch_size=32, full_conv =False):
     num_videos = len(videos)
     distance_matrix = torch.zeros((num_videos, num_videos), device=videos[0].device)
     #print_memory_usage('After Forming Matrix')
-    prev = copy.deepcopy(full_conv)
-    full_conv = False
     with torch.no_grad():
         for i in range(num_videos):
             # Prepare batches for parallel processing
@@ -246,7 +243,7 @@ def cdist_fft_2d_batched(videos, batch_size=32):
                 #print("Type of batch_videos {} and {}".format(type(batch_videos_i), type(batch_videos_j)))
                 #print("Shapes of videos {} and {}".format(batch_videos_i.shape, batch_videos_j.shape))
                 # Compute distances for the batch
-                distances = fft_distance_2d_batch(batch_videos_i, batch_videos_j)
+                distances = fft_distance_2d_batch(batch_videos_i, batch_videos_j, full_conv)
 
                 # Update the distance matrix
                 distance_matrix[i, j:end] = distances
@@ -254,7 +251,6 @@ def cdist_fft_2d_batched(videos, batch_size=32):
             #del batch_videos_j, batch_videos_i, distances
             torch.cuda.empty_cache()
             print_memory_usage('{} Iteration'.format(i))
-    full_conv = prev
     return distance_matrix
 
 def cuda_fft_distances(videos, feature_size, batch=32):
@@ -279,6 +275,7 @@ def compute_cluster_distances(x, cluster_centers):
     centers, cent_length, cent_feature_dim = cluster_centers.shape  # (centers, temporal_length, feature_dim)
 
     # Ensure that the temporal and feature dimensions of x and cluster centers match
+    print('Temporal length {} , centroid length {}'.format(temporal_length, cent_length))
     assert temporal_length == cent_length, "Temporal lengths must match between x and cluster centers."
     assert feature_dim == cent_feature_dim, "Feature dimensions must match between x and cluster centers."
 

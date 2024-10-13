@@ -46,7 +46,7 @@ class ClusterFusion(nn.Module):
         self.feature_dim = cfg.FEATS_DIM
         self.num_cluster = cluster_centers.shape[0]
         self.scale = nn.Parameter(torch.ones(1)).to('cuda') # Learnable scale parameters
-        self.cluster_centers = cluster_centers.view(self.num_cluster, self.temporal_length, -1) # This is similar vectors with x.
+        self.cluster_centers = cluster_centers.view(self.num_cluster, -1, self.feature_dim) # This is similar vectors with x.
         # cluster_centers shape (#clustercenters, #temporalLength, #featureDimension)
         # Cluster distances shape (#batch, #temporalLength, #clusterCenters)
         # X(batched videos) shape (#batch, #temporalLength, #featureDimension)
