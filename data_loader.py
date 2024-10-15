@@ -80,7 +80,7 @@ class NpyFeature(data.Dataset):
         return len(self.vid_list)
 
     def __getitem__(self, index):
-        data, vid_num_seg, sample_idx = self.get_data(index)
+        data, vid_num_seg, sample_idx = self.get_data(index) # gets data, actual vid_length(vid_num_seg) and samples(usually from 0-vid_length)
         label, temp_anno = self.get_label(index, vid_num_seg, sample_idx)
 
         return data, label, temp_anno, self.vid_list[index], vid_num_seg
@@ -136,6 +136,38 @@ class NpyFeature(data.Dataset):
         #logger.log("Feature final shape {}".format(feature_torch.shape), logging.WARNING)
         return feature_torch, vid_num_seg, sample_idx
 
+    def get_temporal_annotations(self, index, vid_length, sample_idx):
+        vid_name = self.vid_list[index]
+        anno_list = self.anno['database'][vid_name]['annotations']
+        label = np.zeros([self.num_classes], dtype=np.float32)
+
+        classwise_anno = [[]] * self.num_classes
+
+        for _anno in anno_list:
+            label[self.class_name_to_idx[_anno['label']]] = 1
+            classwise_anno[self.class_name_to_idx[_anno['label']]].append(_anno)
+
+        temp_anno = np.zeros([vid_length, self.num_classes])
+        t_factor = self.feature_fps / 16 # Since every frame is actually 16 frames because of the feature extraction
+
+        for class_idx in range(self.num_classes):
+            if label[class_idx] != 1: # no annotation for this class skip
+                continue
+
+            for _anno in classwise_anno[class_idx]:
+                tmp_start_sec = float(_anno['segment'][0])
+                tmp_end_sec = float(_anno['segment'][1])
+
+                tmp_start = round(tmp_start_sec * t_factor)
+                tmp_end = round(tmp_end_sec * t_factor)
+
+                temp_anno[tmp_start:tmp_end+1, class_idx] = 1
+
+            temp_anno = temp_anno[sample_idx, :]
+
+        return torch.from_numpy(temp_anno)
+
+
     def get_label(self, index, vid_num_seg, sample_idx):
         vid_name = self.vid_list[index]
         anno_list = self.anno['database'][vid_name]['annotations']
@@ -147,9 +179,7 @@ class NpyFeature(data.Dataset):
             label[self.class_name_to_idx[_anno['label']]] = 1
             classwise_anno[self.class_name_to_idx[_anno['label']]].append(_anno)
 
-        if self.supervision == 'weak':
-            return label, torch.Tensor(0)
-        else:
+        if True # Dont care about supervision lets return temp annotations either way!
             temp_anno = np.zeros([vid_num_seg, self.num_classes])
             t_factor = self.feature_fps / 16
 

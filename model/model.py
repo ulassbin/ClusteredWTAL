@@ -194,7 +194,41 @@ class CrashingVids(nn.Module):
         base_vid_scores = self.get_video_cls_scores(base_cas)
         return video_scores, actionness, cas, base_vid_scores, base_actionnes, base_cas
 
+    def cas_to_proposals(self, cas, threshold, min_proposal_length, fps):
+        # Cas is (temporal_length, num_classes)
+        # Lets convert cas to 0 and 1 array
+        # Lets get the time factor
+        num_classes = cas.shape[1]
+        t_factor = fps / 16
+        # Time index i corresponds to t=i/t_factor seconds
+        cas_thresh = cas > threshold
+        # now somehow we should convert cas_thresh into a proposal list of form [class, start, end, score, normalized_score]
+        # Lets start with a simple approach
+        proposals = [[] * num_classes] 
+        for i in range(num_classes):
+            class_cas = cas_thresh[:,i]
+            for j in range(class_cas.shape[0]):
+                start = -1
+                end = -1
+                score = 0
+                if class_cas[j] == 1:
+                    if start == -1:
+                        start = j
+                    end = j
+                    score += cas[j,i]
+                else:
+                    if start != -1:
+                        if end - start > min_proposal_length:
+                            current_length = end - start
+                            normalized_score = score / current_length
+                            proposals[i].append([i, start/t_factor, end/t_factor, score, normalized_score]) 
+                        start = -1
+                        end = -1
+                        score = 0
+        return proposals
 
+
+        
 if __name__=="__main__":
 
     ModelMain = CrashingVids(cfg, cluster_centers)
