@@ -40,6 +40,8 @@ class NpyFeature(data.Dataset):
             self.feature_path = os.path.join(data_path, 'features', self.mode, self.modal)
 
         self.max_len = self.get_max_len(self.feature_path)
+        if(sampling == 'None'):
+            self.num_segments = self.max_len # If no sampling is specified, use the maximum length (basic padding)
         split_path = os.path.join(data_path, 'split_{}.txt'.format(self.mode))
         split_file = open(split_path, 'r')
         self.vid_list = []
@@ -107,7 +109,7 @@ class NpyFeature(data.Dataset):
             elif self.sampling == 'uniform':
                 sample_idx = self.uniform_sampling(rgb_feature.shape[0])
             else:
-                sample_idx = no_noise(rgb_feature.shape[0])
+                sample_idx = self.no_sampling(rgb_feature.shape[0])
 
             rgb_feature = rgb_feature[sample_idx]
             flow_feature = flow_feature[sample_idx]
@@ -123,13 +125,14 @@ class NpyFeature(data.Dataset):
             elif self.sampling == 'uniform':
                 sample_idx = self.uniform_sampling(feature.shape[0])
             else:
-                sample_idx = self.no_noise(feature.shape[0])
-
+                sample_idx = self.no_sampling(feature.shape[0])
 
             feature = feature[sample_idx]
         
         feature = np.pad(feature, ((0, self.max_len - len(feature)), (0, 0)), mode='constant')
         feature_torch = torch.from_numpy(feature)
+
+        print('Feature final length is {} and vid_ actual length is {}'.format(feature.shape, vid_num_seg))
         #logger.log("Feature final shape {}".format(feature_torch.shape), logging.WARNING)
         return feature_torch, vid_num_seg, sample_idx
 
@@ -167,15 +170,8 @@ class NpyFeature(data.Dataset):
 
             return label, torch.from_numpy(temp_anno)
 
-    def no_noise(self, length):
-        if self.num_segments == length:
-            return np.arange(self.num_segments).astype(int)
-        
-        # Return evenly spaced samples without perturbation
-        samples = np.arange(self.num_segments) * length / self.num_segments
-        samples = np.floor(samples).astype(int)  # Simply round down the calculated indexes
-        return samples
-
+    def no_sampling(self, length):
+        return np.arange(length).astype(int)
 
     def random_perturb(self, length):
         if self.num_segments == length:

@@ -19,6 +19,7 @@ cfg.CLUSTER_PATH= '/home/ulas/Documents/PhD/2.Codes/clustering/data'
 cfg.NUM_WORKERS = 8
 cfg.LAMBDA = 0.01
 cfg.TEMPORAL_LENGTH = 100
+cfg.CLASS_THRESH = 0.5 # Anything over 0.5 is considered to be a prediction for that class
 
 cfg.CAS_THRESH = np.arange(0.0, 0.25, 0.025)
 cfg.ANESS_THRESH = np.arange(0.1, 0.925, 0.025)
