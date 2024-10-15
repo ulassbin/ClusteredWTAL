@@ -199,7 +199,7 @@ class CrashingVids(nn.Module):
         # Lets convert cas to 0 and 1 array
         # Lets get the time factor
         num_classes = cas.shape[1]
-        t_factor = fps / 16
+        index_to_seconds = 16 / fps
         # Time index i corresponds to t=i/t_factor seconds
         cas_thresh = cas > threshold
         # now somehow we should convert cas_thresh into a proposal list of form [class, start, end, score, normalized_score]
@@ -221,7 +221,7 @@ class CrashingVids(nn.Module):
                         if end - start > min_proposal_length:
                             current_length = end - start
                             normalized_score = score / current_length
-                            proposals[i].append([i, start/t_factor, end/t_factor, score, normalized_score]) 
+                            proposals[i].append([i, start*index_to_seconds, end*index_to_seconds, score, normalized_score]) 
                         start = -1
                         end = -1
                         score = 0
