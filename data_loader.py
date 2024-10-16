@@ -83,14 +83,14 @@ class NpyFeature(data.Dataset):
         data, unpadded_video_length, sample_idx = self.get_data(index) # gets data, actual vid_length(vid_num_seg) and samples(usually from 0-vid_length)
         # Data length is usually longer than, unpadded_video_length and len(sample_idx) = unpadded_video_length
         full_vid_length = data.shape[0]
-        label, temp_anno = self.get_label(index, full_vid_length, sample_idx)
+        label, temp_anno, proposal_label = self.get_label(index, full_vid_length, sample_idx) # just class_label, then indexed temporal labels, finally time based proposals
         file_name = self.vid_list[index]
         # so at this point data and temp anno should have same dimensions, lets just print and see
         #print('Temp anno length is', temp_anno.shape)
         #print('Data shape is {} and temp_anno shape is {}'.format(data.shape, temp_anno.shape))
         #print('Label shape is {}'.format(label.shape))
         #exit()
-        return data, label, temp_anno, file_name, unpadded_video_length
+        return data, label, temp_anno, proposal_label, file_name, unpadded_video_length
 
     def get_data_preloaded(self, index):
         vid_name = self.vid_list[index]
@@ -180,8 +180,8 @@ class NpyFeature(data.Dataset):
         anno_list = self.anno['database'][vid_name]['annotations']
         label = np.zeros([self.num_classes], dtype=np.float32)
 
-        classwise_anno = [[]] * self.num_classes
-
+        classwise_anno = [[] for _ in range(self.num_classes) ]
+        proposal_labels = [[] for _ in range(self.num_classes) ]
         for _anno in anno_list:
             label[self.class_name_to_idx[_anno['label']]] = 1
             classwise_anno[self.class_name_to_idx[_anno['label']]].append(_anno)
@@ -198,10 +198,14 @@ class NpyFeature(data.Dataset):
                     tmp_start = round(tmp_start_sec * seconds_to_index) # we can generate more cells somehow...
                     tmp_end = round(tmp_end_sec * seconds_to_index)
                     temp_anno[tmp_start:tmp_end+1, class_idx] = 1
+                    # Add as proposal labels too (in the form of [class, start, end, score, normalized_score]) so we dont lose critical time information
+                    # Keep the score and normalized score = 1 for labels ofc
+                    proposal_labels[class_idx].append([class_idx, tmp_start, tmp_end, 1, 1])
+
 
         
         #temp_anno = temp_anno[sample_idx, :] # No need for now this reduces the size if sample_idx is less than video_length
-        return label, torch.from_numpy(temp_anno)
+        return label, torch.from_numpy(temp_anno), proposal_labels
 
     def no_sampling(self, length):
         return np.arange(length).astype(int)

@@ -64,7 +64,7 @@ def getClusterCentersWDistance(data, labels, precomp_distance):
             clmLogger.log("------LABEL {}".format(label))
             cluster_indexes = np.where(labels == label)[0]
             cluster_blob = data[cluster_indexes]
-            num_points = cluster_data.shape[0]
+            num_points = cluster_blob.shape[0]
             distance_matrix = np.zeros((num_points, num_points))
             for i in range(num_points):
                 for j in range(i+1, num_points):
@@ -167,19 +167,19 @@ def custom_affinitypropagation(data, distance_matrix):
 
 
 def GMM(data):
-	lowest_bic = np.infty
-	best_gmm = None
-	n_components_range = range(1, 6)
-	for n_components in n_components_range:
-	    gmm = GaussianMixture(n_components=n_components)
-	    gmm.fit(X)
-	    bic = gmm.bic(X)
-	    if bic < lowest_bic:
-	        lowest_bic = bic
-	        best_gmm = gmm
+    lowest_bic = np.infty
+    best_gmm = None
+    n_components_range = range(1, 6)
+    for n_components in n_components_range:
+        gmm = GaussianMixture(n_components=n_components)
+        gmm.fit(data)
+        bic = gmm.bic(data)
+        if bic < lowest_bic:
+            lowest_bic = bic
+            best_gmm = gmm
 
-	clmLogger.log("Best number of components: {}".format(best_gmm.n_components))
-	return best_gmm
+    clmLogger.log("Best number of components: {}".format(best_gmm.n_components))
+    return best_gmm
 
 def custom_dbscan(X, eps=0.1, min_samples=2, custom_distance_func=None):
     """

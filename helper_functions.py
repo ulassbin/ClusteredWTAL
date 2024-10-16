@@ -292,3 +292,165 @@ def compute_cluster_distances(x, cluster_centers):
     distances = distances_expanded.view(batch_size, centers, temporal_length).permute(0, 2, 1).to('cuda')  # Shape: (batch_size, temporal_length, centers)
 
     return distances
+
+
+# Given the cas_to_proposals method below. We need to define a new function to nms the proposals
+# Lets implement our own method with a simple approach.
+# We can sort the proposals based on the normalized score and then iterate through them
+# If the current proposal has an overlap with any of the previous proposals, we can ignore it
+# Otherwise we can add it to the final list
+
+# what should be the nms_threshodl values here for example
+# Lets say we have 2 proposals
+# Proposal 1: [0.2, 1, 1, 0.8, 0.8]
+# Proposal 2: [0.0, 0.5, 1.5, 0.7, 0.7]
+
+
+def nms(proposals, nms_threshold):
+    # Sort the proposals based on the normalized score
+    proposals = sorted(proposals, key=lambda x: x[4], reverse=True)
+    final_proposals = []
+    for i in range(len(proposals)):
+        current_proposal = proposals[i]
+        if len(final_proposals) == 0:
+            final_proposals.append(current_proposal)
+        else:
+            # Check for overlap with the previous proposals
+            overlap = False
+            for j in range(len(final_proposals)):
+                # Calculate intersection over union (IoU)
+                start = max(current_proposal[1], final_proposals[j][1])
+                end = min(current_proposal[2], final_proposals[j][2])
+                intersection = max(0, end - start)
+                union = (current_proposal[2] - current_proposal[1]) + (final_proposals[j][2] - final_proposals[j][1]) - intersection
+                iou = intersection / union
+                if iou > nms_threshold:
+                    overlap = True
+                    break
+            if not overlap:
+                final_proposals.append(current_proposal)
+    return final_proposals
+
+# Isnt cas enough to get proposals? why do I need actionness?
+# I think actionness is used to filter out the proposals
+# how do I use actionness to filter out proposals?
+def actionness_filter_proposals(proposals, actionness, cfg):
+    # Lets say actionness is of shape (temporal_length, num_classes)
+    # We can filter out proposals that have actionness less than a threshold
+    # Lets say we have a threshold of 0.5
+    # proposals shape are (num_classes, start, end, score, normalized_score)
+    seconds_to_index = cfg.FEATS_FPS / 16
+    threshold = cfg.ANESS_THRESH
+    filtered_proposals = []
+    for proposal in proposals:
+        start_frame = int(proposal[1] * seconds_to_index)
+        end_frame = int(proposal[2] * seconds_to_index)
+        actionness_values = actionness[start_frame:end_frame]
+        if np.mean(actionness_values) > threshold:
+            filtered_proposals.append(proposal)
+    return filtered_proposals
+
+def cas_to_proposals(cas, threshold, min_proposal_length, fps):
+    # Cas is (temporal_length, num_classes)
+    # Lets convert cas to 0 and 1 array
+    # Lets get the time factor
+    num_classes = cas.shape[1]
+    index_to_seconds = 16 / fps
+    # Time index i corresponds to t=i/t_factor seconds
+    cas_thresh = cas > threshold
+    # now somehow we should convert cas_thresh into a proposal list of form [class, start, end, score, normalized_score]
+    # Lets start with a simple approach
+    proposals = [[] for _ in range(self.num_classes)] 
+    for i in range(num_classes):
+        class_cas = cas_thresh[:,i]
+        for j in range(class_cas.shape[0]):
+            start = -1
+            end = -1
+            score = 0
+            if class_cas[j] == 1:
+                if start == -1:
+                    start = j
+                end = j
+                score += cas[j,i]
+            else:
+                if start != -1:
+                    if end - start > min_proposal_length:
+                        current_length = end - start
+                        normalized_score = score / current_length
+                        proposals[i].append([i, start*index_to_seconds, end*index_to_seconds, score, normalized_score]) 
+                    start = -1
+                    end = -1
+                    score = 0
+    return proposals
+
+# lets given two proposals, calculate the IoU and average IoU. For thresholds use cfg.TIOU_THRESH
+# proposals are in the form of proposal[num_class] = [class, start, end, score, normalized_score]
+# Lets calculate the IoU for each proposal pair
+
+# We need to calculate Iou accuracies for each class and then average them
+def calculate_IoU(proposal1, proposal_label):
+    # First check if the proposals are of the same class
+    # If they are not of the same class, return 0
+    match_indexes = []
+    for classf in range(len(proposal1)):
+        if proposal1[classf][0] != proposal_label[classf][0]:
+            return 0 
+        match_indexes.append(classf)
+    # Now just iterate over the matched indexes and calculate the IoU
+    correspondences = [] # To store class proposal to label prooposal matches by index and IOU
+    # final matches elements should be something like [[proposal],[label],iou]
+    current_iou = 0
+    final_average_iou = 0
+    for index in match_indexes: # 
+        class_proposal1 = proposal1[index]
+        class_label = proposal_label[index]
+        # how to match the proposals to label proposals?
+        # Lets say we have 3 proposals for class_proposal1 and 2 proposals for class_label
+        # Lets calculate the IoU for each proposal in class_proposal1 with each proposal in class_label
+        # But the matching should be one to one right?
+        class_iou = 0
+        for proposal_item in class_proposal1:
+            start1, end1 = proposal_item[1], proposal_item[2]
+            best_iou = 0 # lets go with greedy approach (not one to one!)
+            if(len(class_label) == 0):
+                correspondences.append([proposal_item, [], 0])
+                continue
+            for label_item in class_label:
+                start2, end2 = label_item[1], label_item[2]
+                intersection = max(0, min(end1, end2) - max(start1, start2))
+                union = (end1 - start1) + (end2 - start2) - intersection
+                iou += intersection / union
+                if(iou > best_iou):
+                    best_iou = iou
+            class_iou += best_iou
+            correspondences.append([class_proposal1, class_label, best_iou])
+        current_iou += class_iou / len(class_proposal1) # Summed best class to class IoU
+    final_average_iou = current_iou / len(match_indexes) # Averaged IoU over all classes
+    return final_average_iou, correspondences
+
+def calculate_mAp_from_correspondences(correspondences, num_classes, thresholds):
+    # We need to calculate the mAP for each class
+    # For each class, we need to calculate the precision and recall
+    # For each threshold, we need to calculate the precision and recall
+    average_mAp = 0
+    mAp_list = []
+    for threshold in thresholds:
+        class_matches = [[] for _ in range(len(num_classes))]
+        class_precision = np.zeros(num_classes)
+        class_recall = np.zeros(num_classes)
+        for class_index in range(num_classes):
+            for corresp in correspondences:
+                if corresp[0][0] == class_index: # Check Class
+                    if corresp[2] > threshold: # Check IoU value
+                        class_matches[class_index].append(1)
+                    else:
+                        class_matches[class_index].append(0)
+        
+        for class_index in range(num_classes):
+            class_precision[class_index] = np.sum(class_matches[class_index]) / len(class_matches[class_index])
+            class_recall[class_index] = np.sum(class_matches[class_index]) / len(correspondences)
+        mAp_list.append([np.mean(class_precision), threshold])
+        average_mAp += np.mean(class_precision)
+        # Now calculate the mAP for each class
+    average_mAp = average_mAp / len(thresholds)
+    return mAp_list, average_mAp

@@ -21,8 +21,9 @@ cfg.LAMBDA = 0.01
 cfg.TEMPORAL_LENGTH = 100
 cfg.CLASS_THRESH = 0.5 # Anything over 0.5 is considered to be a prediction for that class
 
-cfg.CAS_THRESH = np.arange(0.0, 0.25, 0.025)
-cfg.ANESS_THRESH = np.arange(0.1, 0.925, 0.025)
+cfg.CAS_THRESH = 0.5
+cfg.ANESS_THRESH = 0.5
+cfg.NMS_THRESH = 0.7
 cfg.TIOU_THRESH = np.linspace(0.1, 0.7, 7)
 cfg.UP_SCALE = 24
 cfg.GT_PATH = os.path.join(cfg.DATA_PATH, 'gt.json')
