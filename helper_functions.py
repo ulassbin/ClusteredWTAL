@@ -360,7 +360,7 @@ def cas_to_proposals(cas, threshold, min_proposal_length, fps):
     cas_thresh = cas > threshold
     # now somehow we should convert cas_thresh into a proposal list of form [class, start, end, score, normalized_score]
     # Lets start with a simple approach
-    proposals = [[] for _ in range(self.num_classes)] 
+    proposals = [[] for _ in range(num_classes)] 
     for i in range(num_classes):
         class_cas = cas_thresh[:,i]
         for j in range(class_cas.shape[0]):

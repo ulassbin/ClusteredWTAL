@@ -85,11 +85,7 @@ class NpyFeature(data.Dataset):
         full_vid_length = data.shape[0]
         label, temp_anno, proposal_label = self.get_label(index, full_vid_length, sample_idx) # just class_label, then indexed temporal labels, finally time based proposals
         file_name = self.vid_list[index]
-        # so at this point data and temp anno should have same dimensions, lets just print and see
-        #print('Temp anno length is', temp_anno.shape)
-        #print('Data shape is {} and temp_anno shape is {}'.format(data.shape, temp_anno.shape))
-        #print('Label shape is {}'.format(label.shape))
-        #exit()
+        #proposal_label = [[]] # blank for now
         return data, label, temp_anno, proposal_label, file_name, unpadded_video_length
 
     def get_data_preloaded(self, index):
@@ -139,7 +135,7 @@ class NpyFeature(data.Dataset):
         feature = np.pad(feature, ((0, self.max_len - len(feature)), (0, 0)), mode='constant')
         feature_torch = torch.from_numpy(feature)
 
-        print('Feature final length is {} and vid_ actual length is {}'.format(feature.shape, vid_num_seg))
+        #print('Feature final length is {} and vid_ actual length is {}'.format(feature.shape, vid_num_seg))
         #logger.log("Feature final shape {}".format(feature_torch.shape), logging.WARNING)
         return feature_torch, vid_num_seg, sample_idx
 
@@ -181,7 +177,7 @@ class NpyFeature(data.Dataset):
         label = np.zeros([self.num_classes], dtype=np.float32)
 
         classwise_anno = [[] for _ in range(self.num_classes) ]
-        proposal_labels = [[] for _ in range(self.num_classes) ]
+        proposal_labels = [[] for _ in range(self.num_classes)]
         for _anno in anno_list:
             label[self.class_name_to_idx[_anno['label']]] = 1
             classwise_anno[self.class_name_to_idx[_anno['label']]].append(_anno)

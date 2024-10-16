@@ -21,6 +21,7 @@ cfg.LAMBDA = 0.01
 cfg.TEMPORAL_LENGTH = 100
 cfg.CLASS_THRESH = 0.5 # Anything over 0.5 is considered to be a prediction for that class
 
+cfg.MIN_PROPOSAL_LENGTH_INDEXWISE = 1
 cfg.CAS_THRESH = 0.5
 cfg.ANESS_THRESH = 0.5
 cfg.NMS_THRESH = 0.7
