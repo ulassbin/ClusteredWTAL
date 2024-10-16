@@ -80,10 +80,17 @@ class NpyFeature(data.Dataset):
         return len(self.vid_list)
 
     def __getitem__(self, index):
-        data, vid_num_seg, sample_idx = self.get_data(index) # gets data, actual vid_length(vid_num_seg) and samples(usually from 0-vid_length)
-        label, temp_anno = self.get_label(index, data.shape[0], sample_idx)
-
-        return data, label, temp_anno, self.vid_list[index], vid_num_seg
+        data, unpadded_video_length, sample_idx = self.get_data(index) # gets data, actual vid_length(vid_num_seg) and samples(usually from 0-vid_length)
+        # Data length is usually longer than, unpadded_video_length and len(sample_idx) = unpadded_video_length
+        full_vid_length = data.shape[0]
+        label, temp_anno = self.get_label(index, full_vid_length, sample_idx)
+        file_name = self.vid_list[index]
+        # so at this point data and temp anno should have same dimensions, lets just print and see
+        #print('Temp anno length is', temp_anno.shape)
+        #print('Data shape is {} and temp_anno shape is {}'.format(data.shape, temp_anno.shape))
+        #print('Label shape is {}'.format(label.shape))
+        #exit()
+        return data, label, temp_anno, file_name, unpadded_video_length
 
     def get_data_preloaded(self, index):
         vid_name = self.vid_list[index]
@@ -178,27 +185,23 @@ class NpyFeature(data.Dataset):
         for _anno in anno_list:
             label[self.class_name_to_idx[_anno['label']]] = 1
             classwise_anno[self.class_name_to_idx[_anno['label']]].append(_anno)
-
-        if True: # Dont care about supervision lets return temp annotations either way!
-            temp_anno = np.zeros([video_length, self.num_classes])
+            temp_anno = np.zeros([video_length, self.num_classes]) # Full vid length num_classes dim array
             seconds_to_index = self.feature_fps / 16
 
             for class_idx in range(self.num_classes):
                 if label[class_idx] != 1:
                     continue
 
-                for _anno in classwise_anno[class_idx]:
+                for _anno in classwise_anno[class_idx]: # Maybe we can do this in a higher resolution next time!
                     tmp_start_sec = float(_anno['segment'][0])
                     tmp_end_sec = float(_anno['segment'][1])
-
-                    tmp_start = round(tmp_start_sec * seconds_to_index)
+                    tmp_start = round(tmp_start_sec * seconds_to_index) # we can generate more cells somehow...
                     tmp_end = round(tmp_end_sec * seconds_to_index)
-
                     temp_anno[tmp_start:tmp_end+1, class_idx] = 1
 
-            temp_anno = temp_anno[sample_idx, :]
-
-            return label, torch.from_numpy(temp_anno)
+        
+        #temp_anno = temp_anno[sample_idx, :] # No need for now this reduces the size if sample_idx is less than video_length
+        return label, torch.from_numpy(temp_anno)
 
     def no_sampling(self, length):
         return np.arange(length).astype(int)
