@@ -308,10 +308,12 @@ def compute_cluster_distances(x, cluster_centers):
 
 def nms(proposals, nms_threshold):
     # Sort the proposals based on the normalized score
-    proposals = sorted(proposals, key=lambda x: x[4], reverse=True)
+    collapsed_proposals = [item for sublist in proposals for item in sublist] # Collapsing classes for nms purposes
+    collapsed_proposals = sorted(collapsed_proposals, key=lambda x: x[4], reverse=True)
     final_proposals = []
-    for i in range(len(proposals)):
-        current_proposal = proposals[i]
+    classed_final_proposals = [[] for _ in range(len(proposals))]
+    for i in range(len(collapsed_proposals)):
+        current_proposal = collapsed_proposals[i]
         if len(final_proposals) == 0:
             final_proposals.append(current_proposal)
         else:
@@ -319,6 +321,7 @@ def nms(proposals, nms_threshold):
             overlap = False
             for j in range(len(final_proposals)):
                 # Calculate intersection over union (IoU)
+                print('Comparing proposals {} and {}'.format(current_proposal, final_proposals[j]))
                 start = max(current_proposal[1], final_proposals[j][1])
                 end = min(current_proposal[2], final_proposals[j][2])
                 intersection = max(0, end - start)
@@ -328,32 +331,34 @@ def nms(proposals, nms_threshold):
                     overlap = True
                     break
             if not overlap:
-                final_proposals.append(current_proposal)
-    return final_proposals
+                final_proposals.append(current_proposal) 
+    for proposal in final_proposals:
+        classed_final_proposals[proposal[0]].append(proposal)
+    return classed_final_proposals
 
 # Isnt cas enough to get proposals? why do I need actionness?
 # I think actionness is used to filter out the proposals
 # how do I use actionness to filter out proposals?
 def actionness_filter_proposals(proposals, actionness, cfg):
-    # Lets say actionness is of shape (temporal_length, num_classes)
-    # We can filter out proposals that have actionness less than a threshold
-    # Lets say we have a threshold of 0.5
-    # proposals shape are (num_classes, start, end, score, normalized_score)
+    # Proposals are in the form of proposal[num_class] = [class, start, end, score, normalized_score]
     seconds_to_index = cfg.FEATS_FPS / 16
     threshold = cfg.ANESS_THRESH
-    filtered_proposals = []
-    for proposal in proposals:
-        start_frame = int(proposal[1] * seconds_to_index)
-        end_frame = int(proposal[2] * seconds_to_index)
-        actionness_values = actionness[start_frame:end_frame]
-        if np.mean(actionness_values) > threshold:
-            filtered_proposals.append(proposal)
+    filtered_proposals = [[] for _ in range(len(proposals))]
+    for class_id in range(len(proposals)):
+        for proposal in proposals[class_id]:
+            print("Proposal ", proposal)
+            start_frame = int(proposal[1] * seconds_to_index)
+            end_frame = int(proposal[2] * seconds_to_index)
+            actionness_values = actionness[start_frame:end_frame]
+            if np.mean(actionness_values) > threshold:
+                filtered_proposals[class_id].append(proposal)
     return filtered_proposals
 
 def cas_to_proposals(cas, threshold, min_proposal_length, fps):
     # Cas is (temporal_length, num_classes)
     # Lets convert cas to 0 and 1 array
     # Lets get the time factor
+    cas = cas.squeeze(0)
     num_classes = cas.shape[1]
     index_to_seconds = 16 / fps
     # Time index i corresponds to t=i/t_factor seconds
@@ -392,23 +397,23 @@ def calculate_IoU(proposal1, proposal_label):
     # First check if the proposals are of the same class
     # If they are not of the same class, return 0
     match_indexes = []
-    for classf in range(len(proposal1)):
-        if proposal1[classf][0] != proposal_label[classf][0]:
-            return 0 
-        match_indexes.append(classf)
-    # Now just iterate over the matched indexes and calculate the IoU
     correspondences = [] # To store class proposal to label prooposal matches by index and IOU
-    # final matches elements should be something like [[proposal],[label],iou]
+    for classf in range(len(proposal1)):
+        if(len(proposal1[classf]) == 0 or len(proposal_label[classf]) == 0):
+            continue
+        match_indexes.append(classf)
+        print("Got a match for class {} proposed {}, target {}".format(classf, len(proposal1[classf]), len(proposal_label[classf])))
     current_iou = 0
     final_average_iou = 0
-    for index in match_indexes: # 
+    if(match_indexes == []):
+        return 0, []
+    # else compute correspondences
+    for index in match_indexes: # For each class 
         class_proposal1 = proposal1[index]
         class_label = proposal_label[index]
-        # how to match the proposals to label proposals?
-        # Lets say we have 3 proposals for class_proposal1 and 2 proposals for class_label
-        # Lets calculate the IoU for each proposal in class_proposal1 with each proposal in class_label
-        # But the matching should be one to one right?
         class_iou = 0
+        if(len(class_proposal1) == 0 or len(class_label) == 0):
+            continue
         for proposal_item in class_proposal1:
             start1, end1 = proposal_item[1], proposal_item[2]
             best_iou = 0 # lets go with greedy approach (not one to one!)
@@ -438,14 +443,12 @@ def calculate_mAp_from_correspondences(correspondences, num_classes, thresholds)
         class_matches = [[] for _ in range(len(num_classes))]
         class_precision = np.zeros(num_classes)
         class_recall = np.zeros(num_classes)
-        for class_index in range(num_classes):
-            for corresp in correspondences:
-                if corresp[0][0] == class_index: # Check Class
-                    if corresp[2] > threshold: # Check IoU value
-                        class_matches[class_index].append(1)
-                    else:
-                        class_matches[class_index].append(0)
-        
+        for corresp in correspondences:
+            if corresp[2] > threshold:
+                class_matches[corresp[0][0]].append(1)
+            else:
+                class_matches[corresp[0][0]].append(0)
+
         for class_index in range(num_classes):
             class_precision[class_index] = np.sum(class_matches[class_index]) / len(class_matches[class_index])
             class_recall[class_index] = np.sum(class_matches[class_index]) / len(correspondences)
