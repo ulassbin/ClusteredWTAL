@@ -181,7 +181,7 @@ class CrashingVids(nn.Module):
 
 
     def forward(self, x):
-        print('X shape {}, temp {}, feature_dim {}'.format( x.shape,self.temporal_length, self.feature_dim))
+        #print('X shape {}, temp {}, feature_dim {}'.format( x.shape,self.temporal_length, self.feature_dim))
         x = x.reshape(-1,self.temporal_length, self.feature_dim)
         batch_size, temporal_length, feature_dim = x.shape
         #print("X device crashingvids {}".format(x.device))

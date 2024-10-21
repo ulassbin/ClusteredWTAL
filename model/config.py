@@ -5,17 +5,19 @@ from easydict import EasyDict as edict
 cfg = edict()
 
 cfg.GPU_ID = '0'
-cfg.LR = '[0.0001]*100'
+cfg.LR = '[0.001]*2000'
 cfg.NUM_ITERS = len(eval(cfg.LR))
+cfg.NUM_EPOCHS = 100
 cfg.NUM_CLASSES = 20
 cfg.MODAL = 'rgb'
-cfg.TEST_FREQ = 10
-cfg.PRINT_FREQ = 2
+cfg.TEST_FREQ = 5 # Every 5 epoch
+cfg.PRINT_FREQ = 20
 cfg.FEATS_DIM = 1024
 cfg.BATCH_SIZE = 10
 cfg.VID_PATH = '/home/ulas/Documents/Datasets/CoLA/data/THUMOS14/features/train/rgb'
 cfg.DATA_PATH = '/home/ulas/Documents/Datasets/CoLA/data/THUMOS14'
 cfg.CLUSTER_PATH= '/home/ulas/Documents/PhD/2.Codes/clustering/data'
+cfg.OUTPUT_PATH= '/home/ulas/Documents/PhD/2.Codes/clustering/results'
 cfg.NUM_WORKERS = 8
 cfg.LAMBDA = 0.01
 cfg.TEMPORAL_LENGTH = 100

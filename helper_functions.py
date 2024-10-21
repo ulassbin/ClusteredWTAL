@@ -440,7 +440,7 @@ def calculate_mAp_from_correspondences(correspondences, num_classes, thresholds)
     average_mAp = 0
     mAp_list = []
     for threshold in thresholds:
-        class_matches = [[] for _ in range(len(num_classes))]
+        class_matches = [[] for _ in range(num_classes)]
         class_precision = np.zeros(num_classes)
         class_recall = np.zeros(num_classes)
         for corresp in correspondences:
@@ -449,7 +449,11 @@ def calculate_mAp_from_correspondences(correspondences, num_classes, thresholds)
             else:
                 class_matches[corresp[0][0]].append(0)
 
+        class_precision = 0
+        class_recall = 0
         for class_index in range(num_classes):
+            if(class_matches[class_index] == []):
+                continue
             class_precision[class_index] = np.sum(class_matches[class_index]) / len(class_matches[class_index])
             class_recall[class_index] = np.sum(class_matches[class_index]) / len(correspondences)
         mAp_list.append([np.mean(class_precision), threshold])
