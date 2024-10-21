@@ -308,85 +308,101 @@ def compute_cluster_distances(x, cluster_centers):
 
 def nms(proposals, nms_threshold):
     # Sort the proposals based on the normalized score
-    collapsed_proposals = [item for sublist in proposals for item in sublist] # Collapsing classes for nms purposes
-    collapsed_proposals = sorted(collapsed_proposals, key=lambda x: x[4], reverse=True)
-    final_proposals = []
-    classed_final_proposals = [[] for _ in range(len(proposals))]
-    for i in range(len(collapsed_proposals)):
-        current_proposal = collapsed_proposals[i]
-        if len(final_proposals) == 0:
-            final_proposals.append(current_proposal)
-        else:
-            # Check for overlap with the previous proposals
-            overlap = False
-            for j in range(len(final_proposals)):
-                # Calculate intersection over union (IoU)
-                print('Comparing proposals {} and {}'.format(current_proposal, final_proposals[j]))
-                start = max(current_proposal[1], final_proposals[j][1])
-                end = min(current_proposal[2], final_proposals[j][2])
-                intersection = max(0, end - start)
-                union = (current_proposal[2] - current_proposal[1]) + (final_proposals[j][2] - final_proposals[j][1]) - intersection
-                iou = intersection / union
-                if iou > nms_threshold:
-                    overlap = True
-                    break
-            if not overlap:
-                final_proposals.append(current_proposal) 
-    for proposal in final_proposals:
-        classed_final_proposals[proposal[0]].append(proposal)
-    return classed_final_proposals
+    # Proposals look like proposal[batch_id][class_id] = [class, start, end, score, normalized_score]
+    batch_size = len(proposals)
+    num_classes = len(proposals[0])
+    # Collapse by batch by batch
+    final_proposals = [[[] for _ in range(num_classes)] for _ in range(batch_size)]
+    for batch_id in range(batch_size):
+        batch_proposals = proposals[batch_id]
+        collapsed_proposals = [item for sublist in batch_proposals for item in sublist] # Collapsing classes for nms purposes
+        collapsed_proposals = sorted(collapsed_proposals, key=lambda x: x[4], reverse=True)
+        batch_final_proposals = []
+        batch_classed_final_proposals = [[] for _ in range(len(proposals))]
+        for i in range(len(collapsed_proposals)):
+            current_proposal = collapsed_proposals[i]
+            if len(batch_final_proposals) == 0:
+                batch_final_proposals.append(current_proposal)
+            else:
+                # Check for overlap with the previous proposals
+                overlap = False
+                for j in range(len(batch_final_proposals)):
+                    # Calculate intersection over union (IoU)
+                    print('Comparing proposals {} and {}'.format(current_proposal, batch_final_proposals[j]))
+                    start = max(current_proposal[1], batch_final_proposals[j][1])
+                    end = min(current_proposal[2], batch_final_proposals[j][2])
+                    intersection = max(0, end - start)
+                    union = (current_proposal[2] - current_proposal[1]) + (batch_final_proposals[j][2] - batch_final_proposals[j][1]) - intersection
+                    iou = intersection / union
+                    if iou > nms_threshold:
+                        overlap = True
+                        break
+                if not overlap:
+                    batch_final_proposals.append(current_proposal) 
+        for proposal in batch_final_proposals:
+            batch_classed_final_proposals[proposal[0]].append(proposal)
+        # Finally append batch_classed_final_proposals to the final list
+        final_proposals[batch_id] = copy.deepcopy(batch_classed_final_proposals) # deepcopy to avoid reference issues 
+    return final_proposals
 
 # Isnt cas enough to get proposals? why do I need actionness?
 # I think actionness is used to filter out the proposals
 # how do I use actionness to filter out proposals?
 def actionness_filter_proposals(proposals, actionness, cfg):
-    # Proposals are in the form of proposal[num_class] = [class, start, end, score, normalized_score]
+    # Proposals are in the form of proposal[batch][num_class] = [class, start, end, score, normalized_score]
+    batch = actionness.shape[0]
     seconds_to_index = cfg.FEATS_FPS / 16
     threshold = cfg.ANESS_THRESH
-    filtered_proposals = [[] for _ in range(len(proposals))]
-    for class_id in range(len(proposals)):
-        for proposal in proposals[class_id]:
-            print("Proposal ", proposal)
-            start_frame = int(proposal[1] * seconds_to_index)
-            end_frame = int(proposal[2] * seconds_to_index)
-            actionness_values = actionness[start_frame:end_frame]
-            if np.mean(actionness_values) > threshold:
-                filtered_proposals[class_id].append(proposal)
+    filtered_proposals = [ [[] for _ in range(len(proposals))] for _ in range(batch)]  
+    for batch_id in range(len(proposals)):
+        batch_proposal = proposals[batch_id]
+        for class_id in range(len(batch_proposal)):
+            for proposal in proposals[class_id]:
+                print("Proposal ", proposal)
+                start_frame = int(proposal[1] * seconds_to_index)
+                end_frame = int(proposal[2] * seconds_to_index)
+                actionness_values = actionness[start_frame:end_frame]
+                if np.mean(actionness_values) > threshold:
+                    filtered_proposals[batch_id][class_id].append(proposal)
     return filtered_proposals
 
 def cas_to_proposals(cas, threshold, min_proposal_length, fps):
     # Cas is (temporal_length, num_classes)
     # Lets convert cas to 0 and 1 array
     # Lets get the time factor
-    cas = cas.squeeze(0)
+    batch = cas.shape[0]
+    #cas = cas.squeeze(0)
     num_classes = cas.shape[1]
     index_to_seconds = 16 / fps
     # Time index i corresponds to t=i/t_factor seconds
     cas_thresh = cas > threshold
     # now somehow we should convert cas_thresh into a proposal list of form [class, start, end, score, normalized_score]
     # Lets start with a simple approach
-    proposals = [[] for _ in range(num_classes)] 
-    for i in range(num_classes):
-        class_cas = cas_thresh[:,i]
-        for j in range(class_cas.shape[0]):
-            start = -1
-            end = -1
-            score = 0
-            if class_cas[j] == 1:
-                if start == -1:
-                    start = j
-                end = j
-                score += cas[j,i]
-            else:
-                if start != -1:
-                    if end - start > min_proposal_length:
-                        current_length = end - start
-                        normalized_score = score / current_length
-                        proposals[i].append([i, start*index_to_seconds, end*index_to_seconds, score, normalized_score]) 
-                    start = -1
-                    end = -1
-                    score = 0
-    return proposals
+    proposals = [[[] for _ in range(num_classes)] for _ in range(batch)]
+    for k in range(batch):
+        batch_proposal = [[] for _ in range(num_classes)]
+        for i in range(num_classes):
+            class_cas = cas_thresh[k,:,i]
+            for j in range(class_cas.shape[0]):
+                start = -1
+                end = -1
+                score = 0
+                if class_cas[j] == 1:
+                    if start == -1:
+                        start = j
+                    end = j
+                    score += cas[k, j,i]
+                else:
+                    if start != -1:
+                        if end - start > min_proposal_length:
+                            current_length = end - start
+                            normalized_score = score / current_length
+                            batch_proposal[i].append([i, start*index_to_seconds, end*index_to_seconds, score, normalized_score]) 
+                        start = -1
+                        end = -1
+                        score = 0
+        proposals[k] = batch_proposal # Assign computed proposal for batch k!
+    return proposals # Proposals is a list with batch, num_classes, proposals
 
 # lets given two proposals, calculate the IoU and average IoU. For thresholds use cfg.TIOU_THRESH
 # proposals are in the form of proposal[num_class] = [class, start, end, score, normalized_score]

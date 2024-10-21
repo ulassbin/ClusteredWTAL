@@ -69,15 +69,23 @@ def test_all(net, cfg, test_loader, test_info, step):
         print_count += 1
         data, label = data.cuda(), torch.tensor(label).cuda()
         vid_num_seg = vid_num_seg[0]
-        video_scores, actionness, cas, base_vid_scores, base_actionnes, base_cas = net(data)
-        # Now we need to convert cas to proposals use the function in helper
-        # We can use the function in helper_functions.py to convert cas to proposals
+        video_scores, actionness, cas, base_vid_scores, base_actionnes, base_cas = net(data) # this works with batch size already
         proposals = helper.cas_to_proposals(cas, cfg.CAS_THRESH, cfg.MIN_PROPOSAL_LENGTH_INDEXWISE, cfg.FEATS_FPS)
-        # calculate proposal length by summing the lengths of all class proposals and print
         filtered_proposals = helper.actionness_filter_proposals(proposals, actionness, cfg)
         final_proposals = helper.nms(filtered_proposals, cfg.NMS_THRESH) # non-maximum suppression
-        final_average_iou, vid_correspondences = helper.calculate_IoU(final_proposals, label_proposals)
-        test_results[file_name[0]] = [final_proposals, final_average_iou, vid_correspondences]
+
+        # Ok at this point things can get complicated because everything is batched :) 
+        # Naive approach first
+        batch_size = len(proposals)
+        final_average_iou = []
+        final_vid_correspondences = []
+        for batch_id in range(batch_size):
+            bfinal_proposals = final_proposals[batch_id]
+            blabel_proposals = label_proposals[batch_id]
+            average_iou, vid_correspondences = helper.calculate_IoU(final_proposals, label_proposals)
+            final_average_iou.append(average_iou)
+            final_vid_correspondences.append(vid_correspondences)
+            test_results[file_name[batch_id]] = [final_proposals, final_average_iou, vid_correspondences]
 
         if(print_count % 50 == 0):
             testLogger.log('Test Progress {}%'.format(print_count/len(test_loader) * 100.0), logging.WARNING)
@@ -88,8 +96,15 @@ def test_all(net, cfg, test_loader, test_info, step):
         # correspondences look like correspondences = [[proposal],[label],iou]] is a list!
         # I want to insert these [proposal],[label],iou] into all_correspondences
         all_correspondences += vid_correspondences 
-
-    mAP_list, average_mAP = helper.calculate_mAp_from_correspondences(all_correspondences, cfg.NUM_CLASSES, cfg.TIOU_THRESH)
+    # Ok again for this lets try naive approach first
+    batch_size = len(final_vid_correspondences)
+    mAp_batch = []
+    for batch_id in range(batch_size):
+        all_correspondences = []
+        all_correspondences += final_vid_correspondences[batch_id]
+        mAP_list, average_mAP = helper.calculate_mAp_from_correspondences(all_correspondences, cfg.NUM_CLASSES, cfg.TIOU_THRESH)
+        mAp_batch.append(average_mAP)
+    final_average_mAP = np.mean(mAp_batch)
     testLogger.log("Average mAP is {}".format(average_mAP), logging.ERROR)
         #final_proposals = [utils.nms(v, cfg.NMS_THRESH) for _,v in proposal_dict.items()]
         #final_res['results'][vid[0]] = utils.result2json(final_proposals, cfg.CLASS_DICT)
@@ -99,8 +114,8 @@ def test_all(net, cfg, test_loader, test_info, step):
 
     test_info["step"].append(step)
     #test_info["test_acc"].append(acc.avg)
-    test_info["average_mAP"].append(average_mAP)
-    test_info['mApAll'].append(mAP_list)
+    test_info["average_mAP"].append(final_average_mAP)
+    test_info['mApAll'].append(mAP_list) # well this is not exactly correct... We should somehow include all batch mAPs
     return test_info
 
 
@@ -156,7 +171,7 @@ test_dataset = NpyFeature(data_path=cfg.DATA_PATH, mode='train', # change mode t
                     class_dict=cfg.CLASS_DICT, seed=cfg.SEED, sampling='None')
 
 test_loader = torch.utils.data.DataLoader(test_dataset,
-        batch_size=1,
+        batch_size=5, # just for testing
         shuffle=False, num_workers=1, # cfg.NUM_WORKERS,
         worker_init_fn=None, collate_fn=custom_collate) # Ok that worked!
 
