@@ -16,4 +16,4 @@ results/
 # Ignore results folder if you don’t want to track outputs
 Results/
 data/
-temp_test/
+temp_test/figures/
