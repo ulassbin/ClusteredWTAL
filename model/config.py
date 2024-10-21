@@ -5,7 +5,7 @@ from easydict import EasyDict as edict
 cfg = edict()
 
 cfg.GPU_ID = '0'
-cfg.LR = '[0.001]*2000'
+cfg.LR = '[0.01]*2000'
 cfg.NUM_ITERS = len(eval(cfg.LR))
 cfg.NUM_EPOCHS = 100
 cfg.NUM_CLASSES = 20

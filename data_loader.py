@@ -47,6 +47,7 @@ class NpyFeature(data.Dataset):
         self.vid_list = []
         for line in split_file:
             self.vid_list.append(line.strip())
+        self.num_videos = len(self.vid_list)
         split_file.close()
         logger.log('=> {} set has {} videos'.format(mode, len(self.vid_list)), logging.WARNING)
 

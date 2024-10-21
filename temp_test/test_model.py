@@ -39,11 +39,11 @@ def custom_collate(batch):
 
 
 
-def train_one_step(net, loader_iter, optimizer, criterion):
+def train_one_step(net, batch, optimizer, criterion):
     net.train()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     try:
-        data, label, temp_anno, proposal_label, file_name, unpadded_video_length = next(loader_iter)
+        data, label, temp_anno, proposal_label, file_name, unpadded_video_length = batch
     except StopIteration:
         raise ValueError("Loader iterator exhausted. Make sure the iterator is reset correctly in the training loop.")
     data, label = data.to(device), torch.tensor(label).to(device)
@@ -204,10 +204,10 @@ for epoch in range(cfg.NUM_EPOCHS):
     epoch_loss = 0
     batch_losses = []
     print('Passed here')
-    for step, batch in enumerate(loader_iter, start=1):
+    for step, batch in enumerate(loader_iter, start=1): # start is just for step variable!
         # Skipping lr adjustment.
         testLogger.log("Training {}%".format(step/len(train_loader) * 100.0))
-        cost = train_one_step(mainModel, loader_iter, optimizer, criterion)
+        cost = train_one_step(mainModel, batch, optimizer, criterion)
         batch_losses.append(cost.item())
         epoch_loss += cost.item()
         if step == 1 or step % cfg.PRINT_FREQ == 0:
