@@ -178,6 +178,19 @@ class CrashingVids(nn.Module):
         avg_scores = filtered_cas.mean(dim=1)  # Shape: (batch_size, num_classes) # this could be sum as well or max 3-4 scores etc.
         video_scores = self.softmax(avg_scores)
         return video_scores
+    
+    def getEmbeddings(self, x):
+        x = x.reshape(-1,self.temporal_length, self.feature_dim)
+        batch_size, temporal_length, feature_dim = x.shape
+        embeddings, cas, actionness = self.actionness_module(x)
+        return embeddings
+    
+    def getClusterEmbeddings(self):
+        x = self.cluster_centers.reshape(-1,self.temporal_length, self.feature_dim)
+        print('Cluster centers shape is ', x.shape)
+        embeddings, cas, actionness = self.actionness_module(x)
+        print('Cluster embeddings shape is ', embeddings.shape)
+        return embeddings
 
 
     def forward(self, x):
@@ -188,11 +201,11 @@ class CrashingVids(nn.Module):
         x_fused, distances = self.cluster_fusion_module(x)
         #print('X fused is ', type(x_fused), ' Shape is ', x_fused.shape)
         embeddings, cas, actionness = self.actionness_module(x_fused)
-        base_embed, base_cas, base_actionnes = self.actionness_module(x)
+        base_embeddings, base_cas, base_actionness = self.actionness_module(x)
 
         video_scores = self.get_video_cls_scores(cas)
         base_vid_scores = self.get_video_cls_scores(base_cas)
-        return video_scores, actionness, cas, base_vid_scores, base_actionnes, base_cas
+        return video_scores, actionness, cas, base_vid_scores, base_actionness, base_cas, embeddings
 
         
 if __name__=="__main__":

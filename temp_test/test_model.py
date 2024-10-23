@@ -9,6 +9,7 @@ from config import cfg
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(os.path.join(project_root, 'model'))
 from model import *
+from loss import *
 import helper_functions as helper
 import data_loader as loader
 from data_loader import NpyFeature
@@ -39,20 +40,40 @@ def custom_collate(batch):
 
 
 
-def train_one_step(net, batch, optimizer, criterion):
+def train_one_step(net, batch, optimizer, criterion_list):
     net.train()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    with torch.no_grad():
+        batch_size = len(batch[0])
+        cluster_embeddings = net.getClusterEmbeddings() # This part is fixed. # To avoid collapsing we can use previous iterations of the network
+        # Form a vector of cluster embeddings (batch, cluster_num, feature_dim)
+        cluster_embeddings_distilled = torch.mean(cluster_embeddings, dim=1) # Distill the cluster embeddings from temporal dims # might have more complicated thing in future
+        cluster_embeddings_expanded = cluster_embeddings_distilled.unsqueeze(0).repeat(batch_size, 1, 1)
     try:
         data, label, temp_anno, proposal_label, file_name, unpadded_video_length = batch
     except StopIteration:
         raise ValueError("Loader iterator exhausted. Make sure the iterator is reset correctly in the training loop.")
     data, label = data.to(device), torch.tensor(label).to(device)
-    video_scores, actionness, cas, base_vid_scores, base_actionnes, base_cas = net(data)
+    video_scores, actionness, cas, base_vid_scores, base_actionnes, base_cas, embeddings = net(data)
+    cost = 0
+    cost_list = []
+    for key in criterion_list.keys():
+        # If key contains auto term
+        if 'auto' in key: # Auto keys are self supervised losses
+            self_learn_scale = 0.1
+            embeddings_distilled = torch.mean(embeddings, dim=1) # Distill the embeddings from temporal dims # Rather than mean select top 10 etc.., or PCA, detect most important moments!
+            loss, pseudo_labels = criterion_list[key](embeddings_distilled, cluster_embeddings_distilled)
+            current_cost = loss # We could also use previous iterations of network
+        else:
+            current_cost = criterion_list[key](video_scores, label)
+        #print("Current cost  from {} is {}".format(key, current_cost))
+        cost_list.append(current_cost)
+        cost += current_cost
     cost = criterion(video_scores, label)
     optimizer.zero_grad()
     cost.backward()
     optimizer.step()
-    return cost
+    return cost, cost_list
 
 
 def count_proposals(proposals):
@@ -106,7 +127,7 @@ def test_all(net, cfg, test_loader, test_info, step):
         batch_size = len(data)
         data, label = data.cuda(), torch.tensor(label).cuda()
         vid_num_seg = vid_num_seg[0]
-        video_scores, actionness, cas, base_vid_scores, base_actionnes, base_cas = net(data) # this works with batch size already
+        video_scores, actionness, cas, base_vid_scores, base_actionnes, base_cas, embeddings = net(data) # this works with batch size already
         proposals = helper.cas_to_proposals(cas, cfg.CAS_THRESH, cfg.MIN_PROPOSAL_LENGTH_INDEXWISE, cfg.FEATS_FPS)
         filtered_proposals = helper.actionness_filter_proposals(proposals, actionness, cfg)
         final_proposals = helper.nms(filtered_proposals, cfg.NMS_THRESH) # non-maximum suppression
@@ -164,7 +185,7 @@ mainModel = CrashingVids(cfg, max_len, torch.tensor(cluster_centers).to('cuda'))
 
 
 with torch.no_grad():
-    video_scores, actionness, cas, base_vid_scores, base_actionnes, base_cas = mainModel(torch.tensor(videos[0:5,:]).to('cuda'))
+    video_scores, actionness, cas, base_vid_scores, base_actionnes, base_cas, embeddings = mainModel(torch.tensor(videos[0:5,:]).to('cuda'))
     print(cas.shape)
     print(base_cas.shape)
 
@@ -218,7 +239,9 @@ cfg.LR = eval(cfg.LR)
 optimizer = torch.optim.Adam(mainModel.parameters(), lr=cfg.LR[0],
     betas=(0.9, 0.999), weight_decay=0.0005)
 
-criterion = ActionLoss()
+autoLoss = AutoLabelClusterCrossEntropyLoss()
+criterion = ActionLoss() # Ok this is not correct, we need to define a new loss function
+criterion_list = {'action': criterion, 'auto': autoLoss}
 
 
 # Define a function to plot loss functions wait for 5-10 seconds and then close the plot
@@ -241,7 +264,7 @@ for epoch in range(cfg.NUM_EPOCHS):
     for step, batch in enumerate(loader_iter, start=1): # start is just for step variable!
         # Skipping lr adjustment.
         testLogger.log("Training {}%".format(step/len(train_loader) * 100.0))
-        cost = train_one_step(mainModel, batch, optimizer, criterion)
+        cost, cost_list = train_one_step(mainModel, batch, optimizer, criterion_list) # In future visualize the cost_list
         batch_losses.append(cost.item())
         epoch_loss += cost.item()
         if step == 1 or step % cfg.PRINT_FREQ == 0:
