@@ -55,6 +55,42 @@ def train_one_step(net, batch, optimizer, criterion):
     return cost
 
 
+def count_proposals(proposals):
+    count = 0
+    for batch_id in range(len(proposals)):
+        for class_id in range(len(proposals[batch_id])):
+            count += len(proposals[batch_id][class_id])
+    return count
+
+
+def visualize_cas(cas, actionness, max_plots=5):
+    # Limit the number of batches to visualize
+    num_plots = min(max_plots, cas.shape[0])
+
+    fig, axs = plt.subplots(num_plots, 2, figsize=(16, 10 * num_plots))  # Increased figure siz
+
+    for batch_id in range(num_plots):
+        cas_batch = cas[batch_id].cpu().numpy()
+        actionness_batch = actionness[batch_id].cpu().numpy()
+
+        # Plotting CAS on the left side
+        for class_id in range(cas_batch.shape[1]):
+            axs[batch_id, 0].plot(cas_batch[:, class_id], label=f'Class {class_id}')
+        axs[batch_id, 0].set_title(f'CAS for Batch {batch_id}')
+        axs[batch_id, 0].set_xlabel('Temporal Length')
+        axs[batch_id, 0].set_ylabel('Class Activation Scores')
+        #axs[batch_id, 0].legend(loc='upper right')
+
+        # Plotting Actionness on the right side
+        axs[batch_id, 1].plot(actionness_batch, label='Actionness', color='r')
+        axs[batch_id, 1].set_title(f'Actionness for Batch {batch_id}')
+        axs[batch_id, 1].set_xlabel('Temporal Length')
+        axs[batch_id, 1].set_ylabel('Actionness Score')
+        #axs[batch_id, 1].legend(loc='upper right')
+    plt.tight_layout()
+    plt.show()
+    
+
 
 
 @torch.no_grad()
@@ -67,44 +103,27 @@ def test_all(net, cfg, test_loader, test_info, step):
     print_count = 0
     for data, label, temp_anno, label_proposals, file_name, vid_num_seg in test_loader:
         print_count += 1
+        batch_size = len(data)
         data, label = data.cuda(), torch.tensor(label).cuda()
         vid_num_seg = vid_num_seg[0]
         video_scores, actionness, cas, base_vid_scores, base_actionnes, base_cas = net(data) # this works with batch size already
         proposals = helper.cas_to_proposals(cas, cfg.CAS_THRESH, cfg.MIN_PROPOSAL_LENGTH_INDEXWISE, cfg.FEATS_FPS)
         filtered_proposals = helper.actionness_filter_proposals(proposals, actionness, cfg)
         final_proposals = helper.nms(filtered_proposals, cfg.NMS_THRESH) # non-maximum suppression
-
-        # Ok at this point things can get complicated because everything is batched :) 
-        # Naive approach first
-        batch_size = len(proposals)
-        final_average_iou = []
-        final_vid_correspondences = []
-        for batch_id in range(batch_size):
-            bfinal_proposals = final_proposals[batch_id]
-            blabel_proposals = label_proposals[batch_id]
-            average_iou, vid_correspondences = helper.calculate_IoU(final_proposals, label_proposals)
-            final_average_iou.append(average_iou)
-            final_vid_correspondences.append(vid_correspondences)
-            test_results[file_name[batch_id]] = [final_proposals, final_average_iou, vid_correspondences]
-
-        if(print_count % 50 == 0):
-            testLogger.log('Test Progress {}%'.format(print_count/len(test_loader) * 100.0), logging.WARNING)
-            testLogger.log("Proposals length is {}".format(sum([len(proposal) for proposal in proposals])), logging.WARNING)
-            testLogger.log("Filtered proposals length is {}".format(sum([len(proposal) for proposal in filtered_proposals])), logging.WARNING)
-            testLogger.log('NMS      proposals length is {}'.format(sum([len(proposal) for proposal in final_proposals])), logging.WARNING)
-            testLogger.log("Final average iou is {}".format(final_average_iou), logging.ERROR)
-        # correspondences look like correspondences = [[proposal],[label],iou]] is a list!
-        # I want to insert these [proposal],[label],iou] into all_correspondences
-        all_correspondences += vid_correspondences 
-    # Ok again for this lets try naive approach first
-    batch_size = len(final_vid_correspondences)
-    mAp_batch = []
-    for batch_id in range(batch_size):
-        all_correspondences = []
-        all_correspondences += final_vid_correspondences[batch_id]
-        mAP_list, average_mAP = helper.calculate_mAp_from_correspondences(all_correspondences, cfg.NUM_CLASSES, cfg.TIOU_THRESH)
-        mAp_batch.append(average_mAP)
-    final_average_mAP = np.mean(mAp_batch)
+        average_iou, vid_correspondences = helper.calculate_IoU(final_proposals, label_proposals)
+        #if(print_count % 2 == 0):
+        testLogger.log('Test Progress {}%'.format(print_count/len(test_loader) * 100.0), logging.WARNING)
+        testLogger.log("Proposals length is {}".format(count_proposals(proposals)), logging.WARNING)
+        testLogger.log("Filtered proposals length is {}".format(count_proposals(filtered_proposals)), logging.WARNING)
+        testLogger.log('NMS      proposals length is {}'.format(count_proposals(final_proposals)), logging.WARNING)
+        testLogger.log("Batch average iou is {}".format(np.mean(average_iou)), logging.ERROR)
+        #visualize_cas(cas, actionness)
+        # Ok again for this lets try naive approach first
+        for batch_id in range(batch_size): # Flatten by batch
+            for example in vid_correspondences[batch_id]: # for every match in a specific batch
+                all_correspondences.append(example) # append to the all_correspondences list
+    mAP_list, average_mAP = helper.calculate_mAp_from_correspondences(all_correspondences, cfg.NUM_CLASSES, cfg.TIOU_THRESH)
+    final_average_mAP = average_mAP
     testLogger.log("Average mAP is {}".format(average_mAP), logging.ERROR)
         #final_proposals = [utils.nms(v, cfg.NMS_THRESH) for _,v in proposal_dict.items()]
         #final_res['results'][vid[0]] = utils.result2json(final_proposals, cfg.CLASS_DICT)

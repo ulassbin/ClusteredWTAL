@@ -318,7 +318,7 @@ def nms(proposals, nms_threshold):
         collapsed_proposals = [item for sublist in batch_proposals for item in sublist] # Collapsing classes for nms purposes
         collapsed_proposals = sorted(collapsed_proposals, key=lambda x: x[4], reverse=True)
         batch_final_proposals = []
-        batch_classed_final_proposals = [[] for _ in range(len(proposals))]
+        batch_classed_final_proposals = [[] for _ in range(num_classes)]
         for i in range(len(collapsed_proposals)):
             current_proposal = collapsed_proposals[i]
             if len(batch_final_proposals) == 0:
@@ -328,7 +328,6 @@ def nms(proposals, nms_threshold):
                 overlap = False
                 for j in range(len(batch_final_proposals)):
                     # Calculate intersection over union (IoU)
-                    print('Comparing proposals {} and {}'.format(current_proposal, batch_final_proposals[j]))
                     start = max(current_proposal[1], batch_final_proposals[j][1])
                     end = min(current_proposal[2], batch_final_proposals[j][2])
                     intersection = max(0, end - start)
@@ -350,19 +349,21 @@ def nms(proposals, nms_threshold):
 # how do I use actionness to filter out proposals?
 def actionness_filter_proposals(proposals, actionness, cfg):
     # Proposals are in the form of proposal[batch][num_class] = [class, start, end, score, normalized_score]
-    batch = actionness.shape[0]
+    num_batch = actionness.shape[0]
+    num_classes = cfg.NUM_CLASSES
     seconds_to_index = cfg.FEATS_FPS / 16
     threshold = cfg.ANESS_THRESH
-    filtered_proposals = [ [[] for _ in range(len(proposals))] for _ in range(batch)]  
-    for batch_id in range(len(proposals)):
+    filtered_proposals = [ [[] for _ in range(num_classes)] for _ in range(num_batch)]
+    assert num_batch == len(proposals), "Number of proposals and actionness should match"
+    for batch_id in range(num_batch):
         batch_proposal = proposals[batch_id]
+        batch_actionness = actionness[batch_id]
         for class_id in range(len(batch_proposal)):
-            for proposal in proposals[class_id]:
-                print("Proposal ", proposal)
+            for proposal in batch_proposal[class_id]:
                 start_frame = int(proposal[1] * seconds_to_index)
                 end_frame = int(proposal[2] * seconds_to_index)
-                actionness_values = actionness[start_frame:end_frame]
-                if np.mean(actionness_values) > threshold:
+                actionness_values = batch_actionness[start_frame:end_frame]
+                if np.mean(actionness_values.cpu().numpy()) > threshold:
                     filtered_proposals[batch_id][class_id].append(proposal)
     return filtered_proposals
 
@@ -371,8 +372,7 @@ def cas_to_proposals(cas, threshold, min_proposal_length, fps):
     # Lets convert cas to 0 and 1 array
     # Lets get the time factor
     batch = cas.shape[0]
-    #cas = cas.squeeze(0)
-    num_classes = cas.shape[1]
+    num_classes = cas.shape[2]
     index_to_seconds = 16 / fps
     # Time index i corresponds to t=i/t_factor seconds
     cas_thresh = cas > threshold
@@ -383,24 +383,31 @@ def cas_to_proposals(cas, threshold, min_proposal_length, fps):
         batch_proposal = [[] for _ in range(num_classes)]
         for i in range(num_classes):
             class_cas = cas_thresh[k,:,i]
-            for j in range(class_cas.shape[0]):
-                start = -1
-                end = -1
-                score = 0
+            time_length = len(class_cas)
+            start = -1
+            end = -1
+            score = 0
+            for j in range(time_length):
                 if class_cas[j] == 1:
                     if start == -1:
                         start = j
                     end = j
-                    score += cas[k, j,i]
+                    score += cas[k, j, i]
                 else:
-                    if start != -1:
+                    if start != -1: # We already started a proposal
                         if end - start > min_proposal_length:
                             current_length = end - start
-                            normalized_score = score / current_length
-                            batch_proposal[i].append([i, start*index_to_seconds, end*index_to_seconds, score, normalized_score]) 
+                            normalized_score = score / current_length 
+                            batch_proposal[i].append([i, start*index_to_seconds, end*index_to_seconds, score.cpu().item(), normalized_score.cpu().item()]) 
+                        # reset start position
                         start = -1
                         end = -1
                         score = 0
+            if start != -1: # Finalize the proposal if it continues until the end of class_cas
+                if time_length -1 - start > min_proposal_length: # +-1 index error is possible her (Check later.)
+                    current_length = time_length-1 - start
+                    normalized_score = score / current_length
+                    batch_proposal[i].append([i, start*index_to_seconds, (time_length-1)*index_to_seconds, score, normalized_score])
         proposals[k] = batch_proposal # Assign computed proposal for batch k!
     return proposals # Proposals is a list with batch, num_classes, proposals
 
@@ -409,44 +416,51 @@ def cas_to_proposals(cas, threshold, min_proposal_length, fps):
 # Lets calculate the IoU for each proposal pair
 
 # We need to calculate Iou accuracies for each class and then average them
-def calculate_IoU(proposal1, proposal_label):
+def calculate_IoU(proposal, proposal_label):
     # First check if the proposals are of the same class
     # If they are not of the same class, return 0
-    match_indexes = []
-    correspondences = [] # To store class proposal to label prooposal matches by index and IOU
-    for classf in range(len(proposal1)):
-        if(len(proposal1[classf]) == 0 or len(proposal_label[classf]) == 0):
-            continue
-        match_indexes.append(classf)
-        print("Got a match for class {} proposed {}, target {}".format(classf, len(proposal1[classf]), len(proposal_label[classf])))
-    current_iou = 0
-    final_average_iou = 0
-    if(match_indexes == []):
-        return 0, []
-    # else compute correspondences
-    for index in match_indexes: # For each class 
-        class_proposal1 = proposal1[index]
-        class_label = proposal_label[index]
-        class_iou = 0
-        if(len(class_proposal1) == 0 or len(class_label) == 0):
-            continue
-        for proposal_item in class_proposal1:
-            start1, end1 = proposal_item[1], proposal_item[2]
-            best_iou = 0 # lets go with greedy approach (not one to one!)
-            if(len(class_label) == 0):
-                correspondences.append([proposal_item, [], 0])
+    batch_size = len(proposal_label)
+    num_classes = len(proposal_label[0])
+    match_indexes = [[] for _ in range(batch_size)]
+    correspondences = [[] for _ in range(batch_size)] # To store class proposal to label prooposal matches by index and IOU
+    for batch_index in range(batch_size):
+        batch_proposal = proposal[batch_index]
+        batch_label = proposal_label[batch_index]
+        for classf in range(len(batch_proposal)):
+            if(len(batch_proposal[classf]) == 0 or len(batch_label[classf]) == 0):
                 continue
-            for label_item in class_label:
-                start2, end2 = label_item[1], label_item[2]
-                intersection = max(0, min(end1, end2) - max(start1, start2))
-                union = (end1 - start1) + (end2 - start2) - intersection
-                iou += intersection / union
-                if(iou > best_iou):
-                    best_iou = iou
-            class_iou += best_iou
-            correspondences.append([class_proposal1, class_label, best_iou])
-        current_iou += class_iou / len(class_proposal1) # Summed best class to class IoU
-    final_average_iou = current_iou / len(match_indexes) # Averaged IoU over all classes
+            match_indexes[batch_index].append(classf)
+            #print("Got a match for class {} proposed {}, target {}".format(classf, len(batch_proposal[classf]), len(batch_label[classf])))
+    current_iou = 0
+    final_average_iou = np.zeros(batch_size)
+    #if(match_indexes == []):
+    #    return 0, []
+    # else compute correspondences
+    for batch_index in range(batch_size): # For each batch
+        batch_match = match_indexes[batch_index]
+        batch_label = proposal_label[batch_index]
+        classwise_iou = [] # To store classwise iou, list because not all classes might be present
+        for class_index in batch_match: # For each matching class
+            class_proposal = proposal[batch_index][class_index]
+            class_label = proposal_label[batch_index][class_index]
+            class_iou = 0
+            if(len(class_proposal) == 0 or len(class_label) == 0):
+                continue
+            for proposal_item in class_proposal:
+                start1, end1 = proposal_item[1], proposal_item[2]
+                best_iou = 0
+                for label_item in class_label: # try to match proposal to the label list
+                    start2, end2 = label_item[1], label_item[2] 
+                    intersection = max(0, min(end1, end2) - max(start1, start2))
+                    union = (end1 - start1) + (end2 - start2) - intersection
+                    iou = intersection / union
+                    if(iou > best_iou):
+                        best_iou = iou
+                class_iou += best_iou
+                correspondences[batch_index].append([proposal_item, label_item, best_iou])
+            class_iou = class_iou / len(class_proposal) if len(class_proposal) > 0 else 0
+            classwise_iou.append(class_iou) # Appending since there might be missing classes
+        final_average_iou[batch_index] = np.mean(classwise_iou) if len(classwise_iou)>0 else 0 # Averaged IoU over all classes
     return final_average_iou, correspondences
 
 def calculate_mAp_from_correspondences(correspondences, num_classes, thresholds):
@@ -459,19 +473,22 @@ def calculate_mAp_from_correspondences(correspondences, num_classes, thresholds)
         class_matches = [[] for _ in range(num_classes)]
         class_precision = np.zeros(num_classes)
         class_recall = np.zeros(num_classes)
-        for corresp in correspondences:
+        for corresp in correspondences: # Sorting the correspondences by class
             if corresp[2] > threshold:
                 class_matches[corresp[0][0]].append(1)
             else:
-                class_matches[corresp[0][0]].append(0)
+                class_matches[corresp[0][0]].append(0) 
 
         class_precision = 0
-        class_recall = 0
+        #class_recall = 0
         for class_index in range(num_classes):
             if(class_matches[class_index] == []):
                 continue
-            class_precision[class_index] = np.sum(class_matches[class_index]) / len(class_matches[class_index])
-            class_recall[class_index] = np.sum(class_matches[class_index]) / len(correspondences)
+            tp = np.sum(class_matches[class_index])
+            fp = len(class_matches[class_index]) - tp # At fp we might have forgotten to account for the line at 
+            #previous steps if(len(batch_proposal[classf]) == 0 or len(batch_label[classf]) == 0):
+            class_precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+            #class_recall = np.sum(class_matches[class_index]) / len(correspondences)
         mAp_list.append([np.mean(class_precision), threshold])
         average_mAp += np.mean(class_precision)
         # Now calculate the mAP for each class

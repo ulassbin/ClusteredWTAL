@@ -5,12 +5,12 @@ from easydict import EasyDict as edict
 cfg = edict()
 
 cfg.GPU_ID = '0'
-cfg.LR = '[0.01]*2000'
+cfg.LR = '[0.001]*2000'
 cfg.NUM_ITERS = len(eval(cfg.LR))
 cfg.NUM_EPOCHS = 100
 cfg.NUM_CLASSES = 20
 cfg.MODAL = 'rgb'
-cfg.TEST_FREQ = 5 # Every 5 epoch
+cfg.TEST_FREQ = 2 # Every 5 epoch
 cfg.PRINT_FREQ = 20
 cfg.FEATS_DIM = 1024
 cfg.BATCH_SIZE = 10
@@ -24,7 +24,7 @@ cfg.TEMPORAL_LENGTH = 100
 cfg.CLASS_THRESH = 0.5 # Anything over 0.5 is considered to be a prediction for that class
 
 cfg.MIN_PROPOSAL_LENGTH_INDEXWISE = 1
-cfg.CAS_THRESH = 0.5
+cfg.CAS_THRESH = 0.1
 cfg.ANESS_THRESH = 0.5
 cfg.NMS_THRESH = 0.7
 cfg.TIOU_THRESH = np.linspace(0.1, 0.7, 7)
