@@ -115,16 +115,15 @@ else:
         cluster_center_indexes, labels = clm.k_medoids(distance_matrix, k=10, max_iter = 200) 
         #visualize_distance_heatmap(distance_matrix, labels, title="Distance Matrix Heatmap")
         visualize_clustering_heatmap(distance_matrix, labels, title="Clustering Heatmap")
-        center_files = filenames[cluster_center_indexes]
+        center_files = video_files[cluster_center_indexes]
         cluster_centers = simple_loader.load_mini_batch(center_files)
     else: # Distance Precomputed method!
         distance_matrix = helper.cuda_fft_distances(video_files, simple_loader, feature_dim, distance_comp_batch) # Second param is batch
         clm.visualize_distance_matrix(distance_matrix)
-        labels, cluster_center_indexes, cluster_centers = clm.custom_affinitypropagation(videos, distance_matrix) # We can do better in precomputation hg
+        labels, cluster_center_indexes, center_files = clm.custom_affinitypropagation(video_files, distance_matrix) # We can do better in precomputation hg
+        cluster_centers = simple_loader.load_mini_batch(center_files)
     np.save('data/cluster_labels.npy',labels)
 
-# Visualize the clusters using PCA
-clm.visualize_clusters_with_pca(videos, labels, title=cluster_method, method='tsne')
 
 if(cluster_centers is None or len(cluster_centers) == 0):
     cluster_center_indexes, cluster_centers = clm.getClusterCenters(videos, labels, distance_comp_batch,  helper.fft_distance_2d_batch) 
@@ -133,3 +132,10 @@ np.save('data/cluster_centers.npy', cluster_centers)
 np.save('data/cluster_center_indexes.npy', cluster_center_indexes)
 
 mainLogger.log("From {} videos Cluster indexes are {}".format(len(videos), cluster_center_indexes))
+
+try:
+    videos = simple_loader.load_mini_batch(video_files)
+    # Visualize the clusters using PCA
+    clm.visualize_clusters_with_pca(videos, labels, title=cluster_method, method='tsne')
+except:
+    print("PCA Visualization failed")
