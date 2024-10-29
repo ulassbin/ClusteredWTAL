@@ -264,6 +264,8 @@ def cdist_fft_2d_batched_filenames(filenames, data_loader, batch_size=32, full_c
         for i in range(num_videos):
             # Prepare batches for parallel processing
             for j in range(i + 1, num_videos, batch_size):
+                progress = (i+1)*(j/batch_size) /(num_videos * num_videos/batch_size)
+                print('Progress {}'.format(progress*100.0))
                 end = min(j + batch_size, num_videos)
                 #print_memory_usage('Before forming batches {},{}'.format(i,j))
                 videos_j = data_loader.load_mini_batch(filenames[j:end])

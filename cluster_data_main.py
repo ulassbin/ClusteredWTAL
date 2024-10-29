@@ -85,14 +85,15 @@ def visualize_clustering_heatmap(distance_matrix, labels, title="Clustering Heat
 
 
 
-# --- Config ---
-data_dirs = ['/home/ulas/Documents/Datasets/CoLA/data/THUMOS14/features/train/rgb', '/home/ulas/Documents/Datasets/CoLA/data/THUMOS14/features/test/flow']
-data_dir = '/home/ulas/Documents/Datasets/CoLA/data/THUMOS14/features/train/rgb'
+# --- Config --- /abyss/home/THUMOS14/features/train/rgb
+data_dirs = ['/abyss/home/THUMOS14/features/train/rgb']
+#data_dirs = ['/abyss/home/THUMOS14/features/train/rgb', '/abyss/home/THUMOS14/features/test/rgb']
+#data_dir = '/home/ulas/Documents/Datasets/CoLA/data/THUMOS14/features/train/rgb'
 cluster_dir = './data'
 load_labels = False
 cluster_method='affinity'
 num_videos = None
-distance_comp_batch = 5 # 30
+distance_comp_batch = 30 # 30
 # Load the videos (specify the number of videos to load, or None to load all)
 simple_loader = loader.simpleLoader(data_dirs, cluster_dir)
 video_files, feature_dim, lengths, max_len = simple_loader.load_videos()
@@ -114,7 +115,8 @@ else:
         cluster_center_indexes, labels = clm.k_medoids(distance_matrix, k=10, max_iter = 200) 
         #visualize_distance_heatmap(distance_matrix, labels, title="Distance Matrix Heatmap")
         visualize_clustering_heatmap(distance_matrix, labels, title="Clustering Heatmap")
-        cluster_centers = videos[cluster_center_indexes]
+        center_files = filenames[cluster_center_indexes]
+        cluster_centers = simple_loader.load_mini_batch(center_files)
     else: # Distance Precomputed method!
         distance_matrix = helper.cuda_fft_distances(video_files, simple_loader, feature_dim, distance_comp_batch) # Second param is batch
         clm.visualize_distance_matrix(distance_matrix)

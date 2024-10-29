@@ -187,9 +187,9 @@ class CrashingVids(nn.Module):
     
     def getClusterEmbeddings(self):
         x = self.cluster_centers.reshape(-1,self.temporal_length, self.feature_dim)
-        print('Cluster centers shape is ', x.shape)
+        #print('Cluster centers shape is ', x.shape)
         embeddings, cas, actionness = self.actionness_module(x)
-        print('Cluster embeddings shape is ', embeddings.shape)
+        #print('Cluster embeddings shape is ', embeddings.shape)
         return embeddings
 
 
