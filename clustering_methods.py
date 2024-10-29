@@ -89,7 +89,7 @@ def visualize_distance_matrix(distance_matrix):
     plt.ylabel('Data Point Index')
     plt.show()
 
-def visualize_clusters_with_pca(data, labels, title="DBSCAN Clustering", method='pca'):
+def visualize_clusters_with_pca(data, labels, title="DBSCAN Clustering", method='pca', save_dir='figures/clusters.png'):
     """
     Function to visualize clustered data with PCA or t-SNE, with each label having a different color.
     
@@ -140,6 +140,7 @@ def visualize_clusters_with_pca(data, labels, title="DBSCAN Clustering", method=
     plt.title(title)
     plt.legend()
     plt.show()
+    plt.savefig(save_dir)
 
 
 

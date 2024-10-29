@@ -49,7 +49,7 @@ def visualize_distance_heatmap(distance_matrix, labels, title="Distance Matrix H
     plt.show()
 
 
-def visualize_clustering_heatmap(distance_matrix, labels, title="Clustering Heatmap"):
+def visualize_clustering_heatmap(distance_matrix, labels, title="Clustering Heatmap", save_dir='figures/heatmap.png'):
     """
     Visualize clustering assignments using a heatmap of the distance matrix.
 
@@ -81,6 +81,9 @@ def visualize_clustering_heatmap(distance_matrix, labels, title="Clustering Heat
     
     plt.tight_layout()
     plt.show()
+    # how to save these plots
+    plt.savefig(save_dir)
+
 
 
 
@@ -94,8 +97,9 @@ load_labels = False
 cluster_method='affinity'
 num_videos = None
 distance_comp_batch = 30 # 30
+quick_run = True
 # Load the videos (specify the number of videos to load, or None to load all)
-simple_loader = loader.simpleLoader(data_dirs, cluster_dir)
+simple_loader = loader.simpleLoader(data_dirs, cluster_dir, quick_run=quick_run)
 video_files, feature_dim, lengths, max_len = simple_loader.load_videos()
 helper.feature_dim = clm.feature_dim = feature_dim
 

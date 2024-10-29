@@ -234,12 +234,13 @@ class NpyFeature(data.Dataset):
 
 
 class simpleLoader():
-    def __init__(self, data_dirs, cluster_path):
+    def __init__(self, data_dirs, cluster_path, quick_run=False):
         # Accept a list of directories instead of a single directory
         self.data_dirs = data_dirs if isinstance(data_dirs, list) else [data_dirs]
         self.cluster_path = cluster_path
         self.feature_dim = 1024
         self.max_len = 2000
+        self.quick_run = quick_run
 
     def load_mini_batch(self, video_paths):
         batch = np.zeros((len(video_paths), self.max_len*self.feature_dim))
@@ -253,8 +254,15 @@ class simpleLoader():
         # Collect video files from all directories
         print('Loading videos from {}'.format(self.data_dirs))
         video_files = []
+        if self.quick_run:
+            max_iters = 40
+        count = 0
         for data_dir in self.data_dirs:
             video_files.extend([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.npy')])
+            if self.quick_run:
+                count += 1
+                if count > max_iters:
+                    break
         
         # Check that there are videos to load
         if not video_files:
