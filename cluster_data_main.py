@@ -89,17 +89,17 @@ def visualize_clustering_heatmap(distance_matrix, labels, title="Clustering Heat
 
 
 # --- Config --- /abyss/home/THUMOS14/features/train/rgb
-data_dirs = ['/abyss/home/THUMOS14/features/train/rgb']
-#data_dirs = ['/abyss/home/THUMOS14/features/train/rgb', '/abyss/home/THUMOS14/features/test/rgb']
+#data_dirs = ['/abyss/home/THUMOS14/features/train/rgb']
+data_dirs = ['/abyss/home/THUMOS14/features/train/rgb', '/abyss/home/THUMOS14/features/test/rgb']
 #data_dir = '/home/ulas/Documents/Datasets/CoLA/data/THUMOS14/features/train/rgb'
 cluster_dir = './data'
 load_labels = False
 cluster_method='affinity'
 num_videos = None
 distance_comp_batch = 30 # 30
-quick_run = True
+quick_run = False
 # Load the videos (specify the number of videos to load, or None to load all)
-simple_loader = loader.simpleLoader(data_dirs, cluster_dir, quick_run=quick_run)
+simple_loader = loader.simpleLoader(data_dirs, cluster_dir, quick_run)
 video_files, feature_dim, lengths, max_len = simple_loader.load_videos()
 helper.feature_dim = clm.feature_dim = feature_dim
 
@@ -135,7 +135,7 @@ if(cluster_centers is None or len(cluster_centers) == 0):
 np.save('data/cluster_centers.npy', cluster_centers)
 np.save('data/cluster_center_indexes.npy', cluster_center_indexes)
 
-mainLogger.log("From {} videos Cluster indexes are {}".format(len(videos), cluster_center_indexes))
+mainLogger.log("From {} videos Cluster indexes are {}".format(len(video_files), cluster_center_indexes))
 
 try:
     videos = simple_loader.load_mini_batch(video_files)

@@ -81,13 +81,14 @@ def getClusterCentersWDistance(data, labels, precomp_distance):
 
 
 
-def visualize_distance_matrix(distance_matrix):
+def visualize_distance_matrix(distance_matrix, save_dir='results/distance_matrix.png'):
     plt.imshow(distance_matrix, cmap='viridis', interpolation='nearest')
     plt.colorbar(label='Distance')
     plt.title('Distance Matrix Heatmap')
     plt.xlabel('Data Point Index')
     plt.ylabel('Data Point Index')
     plt.show()
+    plt.savefig(save_dir)
 
 def visualize_clusters_with_pca(data, labels, title="DBSCAN Clustering", method='pca', save_dir='figures/clusters.png'):
     """
@@ -162,8 +163,8 @@ def custom_affinitypropagation(data, distance_matrix):
     # Output number of clusters and cluster labels
     clmLogger.log("Number of clusters: {}".format(len(set(clustering.labels_))))
     clmLogger.log("Cluster labels: {}".format(clustering.labels_))
-    
-    return clustering.labels_, clustering.cluster_centers_indices_, data[clustering.cluster_centers_indices_]
+    clmLogger.log('Cluster indices: {} type {}'.format(clustering.cluster_centers_indices_, type(clustering.cluster_centers_indices_)))
+    return clustering.labels_, clustering.cluster_centers_indices_, [data[i] for i in clustering.cluster_centers_indices_]
 
 
 

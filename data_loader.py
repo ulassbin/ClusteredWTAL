@@ -255,15 +255,18 @@ class simpleLoader():
         print('Loading videos from {}'.format(self.data_dirs))
         video_files = []
         if self.quick_run:
-            max_iters = 40
+            max_iters = 30
+            print('Max iters ', max_iters)
         count = 0
         for data_dir in self.data_dirs:
             video_files.extend([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.npy')])
             if self.quick_run:
-                count += 1
-                if count > max_iters:
+                count += len([f for f in os.listdir(data_dir) if f.endswith('npy')])
+                if count >= max_iters:
+                    video_files = video_files[:max_iters]
                     break
-        
+        print('Loaded videos length ', len(video_files))
+        #exit()
         # Check that there are videos to load
         if not video_files:
             raise ValueError("No video files found in the specified directories.")
