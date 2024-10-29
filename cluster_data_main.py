@@ -86,20 +86,21 @@ def visualize_clustering_heatmap(distance_matrix, labels, title="Clustering Heat
 
 
 # --- Config ---
+data_dirs = ['/home/ulas/Documents/Datasets/CoLA/data/THUMOS14/features/train/rgb', '/home/ulas/Documents/Datasets/CoLA/data/THUMOS14/features/test/flow']
 data_dir = '/home/ulas/Documents/Datasets/CoLA/data/THUMOS14/features/train/rgb'
 cluster_dir = './data'
 load_labels = False
 cluster_method='affinity'
 num_videos = None
-distance_comp_batch = 30 # 30
+distance_comp_batch = 5 # 30
 # Load the videos (specify the number of videos to load, or None to load all)
-simple_loader = loader.simpleLoader(data_dir, cluster_dir)
-videos, feature_dim, lengths, filenames = simple_loader.load_videos()
+simple_loader = loader.simpleLoader(data_dirs, cluster_dir)
+video_files, feature_dim, lengths, max_len = simple_loader.load_videos()
 helper.feature_dim = clm.feature_dim = feature_dim
 
 plt.plot(lengths)
 plt.show()
-mainLogger.log("Videos shape {}, {}, features {}".format(len(videos), videos.shape, feature_dim), logging.WARNING)
+#mainLogger.log("Videos shape {}, {}, features {}".format(len(videos), videos.shape, feature_dim), logging.WARNING)
 cluster_centers = None
 if(load_labels):
     labels, cluster_centers, cluster_center_indexes = loader.load_cluster_information()
@@ -107,14 +108,15 @@ else:
     if(cluster_method == 'DBSCAN'):
         labels = clm.custom_dbscan(videos, eps=0.5*1e-4, min_samples=2, custom_distance_func=helper.fft_distance_2d)
     elif(cluster_method == 'kmedoids'):
-        distance_matrix = helper.cuda_fft_distances(videos, feature_dim, distance_comp_batch) # Second param is batch
+        distance_matrix = helper.cuda_fft_distances(video_files, simple_loader, feature_dim, distance_comp_batch) # Second param is batch
         clm.visualize_distance_matrix(distance_matrix)
+        exit()
         cluster_center_indexes, labels = clm.k_medoids(distance_matrix, k=10, max_iter = 200) 
         #visualize_distance_heatmap(distance_matrix, labels, title="Distance Matrix Heatmap")
         visualize_clustering_heatmap(distance_matrix, labels, title="Clustering Heatmap")
         cluster_centers = videos[cluster_center_indexes]
     else: # Distance Precomputed method!
-        distance_matrix = helper.cuda_fft_distances(videos, feature_dim, distance_comp_batch) # Second param is batch
+        distance_matrix = helper.cuda_fft_distances(video_files, simple_loader, feature_dim, distance_comp_batch) # Second param is batch
         clm.visualize_distance_matrix(distance_matrix)
         labels, cluster_center_indexes, cluster_centers = clm.custom_affinitypropagation(videos, distance_matrix) # We can do better in precomputation hg
     np.save('data/cluster_labels.npy',labels)

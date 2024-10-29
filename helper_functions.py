@@ -176,7 +176,6 @@ def fft_distance_2d_batch(video_batch1, video_batch2, full_conv=True):
     video_batch1 = F.normalize(video_batch1, dim=2)
     video_batch2 = F.normalize(video_batch2, dim=2)
     #video_batch2 = torch.roll(video_batch1, shifts=100, dims=1)  # Circular shift along temporal dimension (dim=1) to test
-
     # Get the size of each batch
     n1, d1 = video_batch1.shape[1], video_batch1.shape[2]
     n2, d2 = video_batch2.shape[1], video_batch2.shape[2]
@@ -243,6 +242,38 @@ def cdist_fft_2d_batched(videos, batch_size=32, full_conv =False):
                 #print("Type of batch_videos {} and {}".format(type(batch_videos_i), type(batch_videos_j)))
                 #print("Shapes of videos {} and {}".format(batch_videos_i.shape, batch_videos_j.shape))
                 # Compute distances for the batch
+                torch.cuda.empty_cache()
+                distances = fft_distance_2d_batch(batch_videos_i, batch_videos_j, full_conv)
+                torch.cuda.empty_cache()
+                # Update the distance matrix
+                distance_matrix[i, j:end] = distances
+                distance_matrix[j:end, i] = distances  # Symmetric matrix
+            #del batch_videos_j, batch_videos_i, distances
+            torch.cuda.empty_cache()
+            print_memory_usage('{} Iteration'.format(i))
+    return distance_matrix
+
+
+def cdist_fft_2d_batched_filenames(filenames, data_loader, batch_size=32, full_conv =False):
+    num_videos = len(filenames)
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    distance_matrix = torch.zeros((num_videos, num_videos), device=device)
+
+    #print_memory_usage('After Forming Matrix')
+    with torch.no_grad():
+        for i in range(num_videos):
+            # Prepare batches for parallel processing
+            for j in range(i + 1, num_videos, batch_size):
+                end = min(j + batch_size, num_videos)
+                #print_memory_usage('Before forming batches {},{}'.format(i,j))
+                videos_j = data_loader.load_mini_batch(filenames[j:end])
+                videos_i = data_loader.load_mini_batch([filenames[i]]*(end-j))
+                batch_videos_j = torch.tensor(videos_j).to('cuda').reshape(-1, data_loader.max_len, data_loader.feature_dim)  # Pad videos in the batch
+                batch_videos_i = torch.tensor(videos_i).to('cuda').reshape(-1, data_loader.max_len, data_loader.feature_dim)
+                #print_memory_usage('After Forming batches {},{}'.format(i,j))
+                #print("Type of batch_videos {} and {}".format(type(batch_videos_i), type(batch_videos_j)))
+                #print("Shapes of videos {} and {}".format(batch_videos_i.shape, batch_videos_j.shape))
+                # Compute distances for the batch
                 distances = fft_distance_2d_batch(batch_videos_i, batch_videos_j, full_conv)
 
                 # Update the distance matrix
@@ -253,15 +284,17 @@ def cdist_fft_2d_batched(videos, batch_size=32, full_conv =False):
             print_memory_usage('{} Iteration'.format(i))
     return distance_matrix
 
-def cuda_fft_distances(videos, feature_size, batch=32):
+
+
+def cuda_fft_distances(filenames, data_loader,  feature_size, batch=32):
     # Videos shape is, (#num_videos, max_lenxfeature_dim)
-    helperLogger.log('Videos shape here {} {}'.format(len(videos), videos.shape))
-    num_videos = len(videos)
+    helperLogger.log('Videos shape here {}'.format(len(filenames)))
+    num_videos = len(filenames)
     print_memory_usage('Before tensors')
-    videos = torch.from_numpy(videos.reshape(num_videos,-1,feature_dim)).float()  # Move videos to GPU
+    #videos = torch.from_numpy(videos.reshape(num_videos,-1,feature_dim)).float()  # Move videos to GPU
     print_memory_usage('After Converting to Tensor')
-    helperLogger.log('Moved video to Gpu, videos type', type(videos))
-    distance_matrix = cdist_fft_2d_batched(videos, batch_size=batch)
+    #helperLogger.log('Moved video to Gpu, videos type', type(videos))
+    distance_matrix = cdist_fft_2d_batched_filenames(filenames, data_loader, batch_size=batch)
     print_memory_usage('After Calculating Distance Matrix')
     time.sleep(2)
     torch.cuda.empty_cache()
