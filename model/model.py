@@ -20,12 +20,17 @@ class Simple_Actionness_Module(nn.Module):
                       stride=1, padding=1),
             nn.ReLU()
         )
+        # initialize the weights of the embed layer
+        nn.init.xavier_uniform_(self.f_embed[0].weight)
+
 
         self.f_cls = nn.Sequential(
             nn.Conv1d(in_channels=2048, out_channels=num_classes, kernel_size=1,
                       stride=1, padding=0, bias=False),
             nn.ReLU()
         )
+        # initialize the weights of the cls layer
+        nn.init.xavier_uniform_(self.f_cls[0].weight)
         self.dropout = nn.Dropout(p=0.7)
 
     def forward(self, x):
@@ -46,6 +51,8 @@ class ClusterFusion(nn.Module):
         self.feature_dim = cfg.FEATS_DIM
         self.num_cluster = cluster_centers.shape[0]
         self.scale = nn.Parameter(torch.ones(1)).to('cuda') # Learnable scale parameters
+        # initialize the weights of the cls layer
+        nn.init.xavier_uniform_(self.scale)
         self.cluster_centers = cluster_centers.view(self.num_cluster, -1, self.feature_dim) # This is similar vectors with x.
         self.cluster_centers = self.cluster_centers.to(dtype=torch.float32, device='cuda')
         # cluster_centers shape (#clustercenters, #temporalLength, #featureDimension)
@@ -100,10 +107,14 @@ class TransformerClusterFusion(nn.Module):
             batch_first=True
         )
         self.transformer_encoder = nn.TransformerEncoder(self.transformer_encoder_layer, num_layers=4)
-
+        # initialize the weights of the transformer encoder
+        for p in self.transformer_encoder.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
         # Linear layer to project information after transformer
         self.projection = nn.Linear(cfg.feature_dim, cfg.feature_dim)
-
+        # initialize the weights of the projection layer
+        nn.init.xavier_uniform_(self.projection.weight)
     def fuse(self, x, cluster_distances):
         """
         Args:
@@ -158,7 +169,7 @@ class TransformerClusterFusion(nn.Module):
 
 
 class CrashingVids(nn.Module):
-    def __init__(self, cfg, temporal_length, cluster_centers):
+    def __init__(self, cfg, temporal_length, cluster_centers, transformer=False, learnable_cls=False):
         super(CrashingVids, self).__init__()
         #cfg.TEMPORAL_LENGTH = temporal_length
         self.temporal_length = cfg.TEMPORAL_LENGTH
@@ -167,18 +178,32 @@ class CrashingVids(nn.Module):
         self.cluster_centers = cluster_centers.to(dtype=torch.float32, device='cuda') # This is similar vectors with x.
         self.softmax = nn.Softmax(dim=1)
         self.actionness_module = Simple_Actionness_Module(cfg.FEATS_DIM, cfg.NUM_CLASSES).to('cuda') # TransformerClusterFusion
-        self.cluster_fusion_module = ClusterFusion(cfg, cluster_centers).to('cuda')
-    
+        self.cluster_fusion_module = ClusterFusion(cfg, cluster_centers).to('cuda') if not transformer else TransformerClusterFusion(cfg, cluster_centers).to('cuda')
+        self.cls_distallation = nn.Linear(cfg.TEMPORAL_LENGTH, 1)
+        # initialize the weights of the cls layer
+        nn.init.xavier_uniform_(self.cls_distallation.weight)
+        self.learnable_cls = learnable_cls
+
     def get_video_cls_scores(self, cas, filtered=None):
         # If no filtered indexes are provided, use the full temporal length
         if filtered is None:
             filtered = torch.arange(cas.size(1), device=cas.device)  # Full range of temporal length
 
+        # Select filtered cas and permute to match the input shape expected by cls_distallation
         filtered_cas = cas[:, filtered, :]  # Shape: (batch_size, filtered_length, num_classes)
-        avg_scores = filtered_cas.mean(dim=1)  # Shape: (batch_size, num_classes) # this could be sum as well or max 3-4 scores etc.
+        batch, filtered_length, num_classes = filtered_cas.size()
+        # Apply classification layer if learnable_cls is set
+        if self.learnable_cls:
+            filtered_cas = filtered_cas.permute(0, 2, 1).reshape(-1, filtered_length)  # Shape: (batch_size, num_classes, filtered_length)
+            avg_scores = self.cls_distallation(filtered_cas).squeeze(2)  # Shape: (batch_size, num_classes)
+            avg_scores = avg_scores.reshape(batch, num_classes)
+        else:
+            avg_scores = filtered_cas.mean(dim=1)  # Shape: (batch_size, num_classes)
+
+        # Apply softmax to get the final video scores
         video_scores = self.softmax(avg_scores)
         return video_scores
-    
+
     def getEmbeddings(self, x):
         x = x.reshape(-1,self.temporal_length, self.feature_dim)
         batch_size, temporal_length, feature_dim = x.shape
@@ -192,7 +217,6 @@ class CrashingVids(nn.Module):
         embeddings, cas, actionness = self.actionness_module(x)
         #print('Cluster embeddings shape is ', embeddings.shape)
         return embeddings
-
 
     def forward(self, x):
         #print('X shape {}, temp {}, feature_dim {}'.format( x.shape,self.temporal_length, self.feature_dim))
