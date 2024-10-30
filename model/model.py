@@ -47,6 +47,7 @@ class ClusterFusion(nn.Module):
         self.num_cluster = cluster_centers.shape[0]
         self.scale = nn.Parameter(torch.ones(1)).to('cuda') # Learnable scale parameters
         self.cluster_centers = cluster_centers.view(self.num_cluster, -1, self.feature_dim) # This is similar vectors with x.
+        self.cluster_centers = self.cluster_centers.to(dtype=torch.float32, device='cuda')
         # cluster_centers shape (#clustercenters, #temporalLength, #featureDimension)
         # Cluster distances shape (#batch, #temporalLength, #clusterCenters)
         # X(batched videos) shape (#batch, #temporalLength, #featureDimension)
@@ -159,12 +160,11 @@ class TransformerClusterFusion(nn.Module):
 class CrashingVids(nn.Module):
     def __init__(self, cfg, temporal_length, cluster_centers):
         super(CrashingVids, self).__init__()
-        cfg.TEMPORAL_LENGTH = temporal_length
+        #cfg.TEMPORAL_LENGTH = temporal_length
         self.temporal_length = cfg.TEMPORAL_LENGTH
         self.feature_dim = cfg.FEATS_DIM
         self.scale = nn.Parameter(torch.ones(1)) # Learnable scale parameters
-        self.cluster_centers = cluster_centers # This is similar vectors with x.
-
+        self.cluster_centers = cluster_centers.to(dtype=torch.float32, device='cuda') # This is similar vectors with x.
         self.softmax = nn.Softmax(dim=1)
         self.actionness_module = Simple_Actionness_Module(cfg.FEATS_DIM, cfg.NUM_CLASSES).to('cuda') # TransformerClusterFusion
         self.cluster_fusion_module = ClusterFusion(cfg, cluster_centers).to('cuda')
@@ -186,6 +186,7 @@ class CrashingVids(nn.Module):
         return embeddings
     
     def getClusterEmbeddings(self):
+        print("Centers shape {}".format(self.cluster_centers.shape))
         x = self.cluster_centers.reshape(-1,self.temporal_length, self.feature_dim)
         #print('Cluster centers shape is ', x.shape)
         embeddings, cas, actionness = self.actionness_module(x)

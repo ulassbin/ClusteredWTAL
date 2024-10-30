@@ -20,7 +20,7 @@ def set_seed(seed):
 
 
 class NpyFeature(data.Dataset):
-    def __init__(self, data_path, mode, modal, feature_fps, num_segments, sampling, class_dict, seed=-1, supervision='weak'):
+    def __init__(self, data_path, mode, modal, feature_fps, num_segments, sampling, class_dict, seed=-1, supervision='weak', len_override=None):
         if seed >= 0:
             set_seed(seed)
 
@@ -40,6 +40,8 @@ class NpyFeature(data.Dataset):
             self.feature_path = os.path.join(data_path, 'features', self.mode, self.modal)
 
         self.max_len = self.get_max_len(self.feature_path)
+        if(len_override is not None):
+            self.max_len = len_override
         if(sampling == 'None'):
             self.num_segments = self.max_len # If no sampling is specified, use the maximum length (basic padding)
         split_path = os.path.join(data_path, 'split_{}.txt'.format(self.mode))

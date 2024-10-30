@@ -5,7 +5,7 @@ from easydict import EasyDict as edict
 cfg = edict()
 
 cfg.GPU_ID = '0'
-cfg.LR = '[0.001]*2000'
+cfg.LR = '[0.001]*500'
 cfg.NUM_ITERS = len(eval(cfg.LR))
 cfg.NUM_EPOCHS = 500
 cfg.NUM_CLASSES = 20
@@ -20,7 +20,7 @@ cfg.CLUSTER_PATH= '/abyss/home/ClusteredWTAL/data'
 cfg.OUTPUT_PATH= '/abyss/home/ClusteredWTAL/results'
 cfg.NUM_WORKERS = 8
 cfg.LAMBDA = 0.01
-cfg.TEMPORAL_LENGTH = 100
+cfg.TEMPORAL_LENGTH = 2614
 cfg.CLASS_THRESH = 0.5 # Anything over 0.5 is considered to be a prediction for that class
 
 cfg.MIN_PROPOSAL_LENGTH_INDEXWISE = 1

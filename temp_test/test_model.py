@@ -60,7 +60,7 @@ def train_one_step(net, batch, optimizer, criterion_list):
     for key in criterion_list.keys():
         # If key contains auto term
         if 'auto' in key: # Auto keys are self supervised losses
-            self_learn_scale = 0.1
+            self_learn_scale = 0.01
             embeddings_distilled = torch.mean(embeddings, dim=1) # Distill the embeddings from temporal dims # Rather than mean select top 10 etc.., or PCA, detect most important moments!
             loss, pseudo_labels = criterion_list[key](embeddings_distilled, cluster_embeddings_distilled)
             current_cost = loss # We could also use previous iterations of network
@@ -174,20 +174,20 @@ class ActionLoss(nn.Module):
 
 num_videos=None
 simple_loader = loader.simpleLoader(cfg.VID_PATH, cfg.CLUSTER_PATH)
-videos, feature_dim, frame_lengths, max_len = simple_loader.load_videos()
+videofiles, feature_dim, frame_lengths, max_len = simple_loader.load_videos()
 assert(feature_dim == cfg.FEATS_DIM)
 cluster_labels, cluster_centers, cluster_center_indexes = simple_loader.load_cluster_information()
 
-print('Feature dim {}, videos {}'.format(feature_dim, videos.shape))
+print('Feature dim {}, videos {}'.format(feature_dim, len(videofiles)))
 print('Cluster labels {}, cluster_centers {}, cluster_center_indexes {}'.format(cluster_labels.shape, cluster_centers.shape, cluster_center_indexes.shape))
 
 mainModel = CrashingVids(cfg, max_len, torch.tensor(cluster_centers).to('cuda'))
 
 
-with torch.no_grad():
-    video_scores, actionness, cas, base_vid_scores, base_actionnes, base_cas, embeddings = mainModel(torch.tensor(videos[0:5,:]).to('cuda'))
-    print(cas.shape)
-    print(base_cas.shape)
+#with torch.no_grad():
+#    video_scores, actionness, cas, base_vid_scores, base_actionnes, base_cas, embeddings = mainModel(torch.tensor(videos[0:5,:]).to('cuda'))
+#    print(cas.shape)
+#    print(base_cas.shape)
 
 
 
@@ -195,7 +195,7 @@ with torch.no_grad():
 dataset = NpyFeature(data_path=cfg.DATA_PATH, mode='train',
                     modal=cfg.MODAL, feature_fps=cfg.FEATS_FPS,
                     num_segments=cfg.NUM_SEGMENTS, supervision='weak',
-                    class_dict=cfg.CLASS_DICT, seed=cfg.SEED, sampling='None')
+                    class_dict=cfg.CLASS_DICT, seed=cfg.SEED, sampling='None', len_override=cfg.TEMPORAL_LENGTH)
 
 dataset.__getitem__(1)
 
@@ -208,7 +208,7 @@ train_loader = torch.utils.data.DataLoader(dataset,
 test_dataset = NpyFeature(data_path=cfg.DATA_PATH, mode='train', # change mode to test later!
                     modal=cfg.MODAL, feature_fps=cfg.FEATS_FPS,
                     num_segments=cfg.NUM_SEGMENTS, supervision='weak',
-                    class_dict=cfg.CLASS_DICT, seed=cfg.SEED, sampling='None')
+                    class_dict=cfg.CLASS_DICT, seed=cfg.SEED, sampling='None', len_override=cfg.TEMPORAL_LENGTH)
 
 test_loader = torch.utils.data.DataLoader(test_dataset,
         batch_size=5, # just for testing
@@ -281,6 +281,6 @@ for epoch in range(cfg.NUM_EPOCHS):
         #print("Test info is {}".format(test_info))
         print("Test info average mAP is {}".format(test_info['average_mAP'][-1]))
         print("Test info mApAll is {}".format(test_info['mApAll'][-1]))
-        write_test_info(test_info, os.path.join(cfg.OUTPUT_PATH, "best_results.txt"))
+        write_test_info(test_info, os.path.join(cfg.OUTPUT_PATH, "best_results1.txt"))
         plot_loss(epoch_losses)
-
+        torch.save(mainModel.state_dict(), os.path.join(cfg.OUTPUT_PATH, 'model_weights.pth'))
