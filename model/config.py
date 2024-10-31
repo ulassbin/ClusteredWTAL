@@ -5,6 +5,8 @@ from easydict import EasyDict as edict
 cfg = edict()
 
 cfg.GPU_ID = '0'
+cfg.SELF_LEARN_SCALE = '0.1'
+cfg.FUSION = 'transformer'
 cfg.LR = '[0.001]*500'
 cfg.NUM_ITERS = len(eval(cfg.LR))
 cfg.NUM_EPOCHS = 500

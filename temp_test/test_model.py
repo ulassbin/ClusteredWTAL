@@ -40,7 +40,7 @@ def custom_collate(batch):
 
 
 
-def train_one_step(net, batch, optimizer, criterion_list):
+def train_one_step(net, batch, optimizer, criterion_list, cfg):
     net.train()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     with torch.no_grad():
@@ -60,7 +60,7 @@ def train_one_step(net, batch, optimizer, criterion_list):
     for key in criterion_list.keys():
         # If key contains auto term
         if 'auto' in key: # Auto keys are self supervised losses
-            self_learn_scale = 0.01
+            self_learn_scale = cfg.SELF_LEARN_SCALE
             embeddings_distilled = torch.mean(embeddings, dim=1) # Distill the embeddings from temporal dims # Rather than mean select top 10 etc.., or PCA, detect most important moments!
             loss, pseudo_labels = criterion_list[key](embeddings_distilled, cluster_embeddings_distilled)
             current_cost = loss # We could also use previous iterations of network
@@ -221,7 +221,7 @@ test_loader = torch.utils.data.DataLoader(test_dataset,
 
 # Define a function to write items in test info to a file
 # dont overwrite each time append!
-def write_test_info(test_info, file_path):
+def write_test_info(test_info, loss, file_path):
     with open(file_path, 'a') as f:
         f.write("Step: {}\n".format(test_info["step"][-1]))
         #f.write("Test_acc: {:.4f}\n".format(test_info["test_acc"][-1]))
@@ -229,6 +229,7 @@ def write_test_info(test_info, file_path):
         tIoU_thresh = np.linspace(0.1, 0.7, 7)
         for i in range(len(tIoU_thresh)):
             f.write("mAP@{}: {}\n".format(tIoU_thresh[i], test_info["mApAll"][-1][i]))
+        f.write('Loss: {}'.format(loss))
         f.close()
 
 
@@ -264,7 +265,7 @@ for epoch in range(cfg.NUM_EPOCHS):
     for step, batch in enumerate(loader_iter, start=1): # start is just for step variable!
         # Skipping lr adjustment.
         testLogger.log("Training {}%".format(step/len(train_loader) * 100.0))
-        cost, cost_list = train_one_step(mainModel, batch, optimizer, criterion_list) # In future visualize the cost_list
+        cost, cost_list = train_one_step(mainModel, batch, optimizer, criterion_list, cfg) # In future visualize the cost_list
         batch_losses.append(cost.item())
         epoch_loss += cost.item()
         if step == 1 or step % cfg.PRINT_FREQ == 0:
@@ -281,6 +282,6 @@ for epoch in range(cfg.NUM_EPOCHS):
         #print("Test info is {}".format(test_info))
         print("Test info average mAP is {}".format(test_info['average_mAP'][-1]))
         print("Test info mApAll is {}".format(test_info['mApAll'][-1]))
-        write_test_info(test_info, os.path.join(cfg.OUTPUT_PATH, "best_results1.txt"))
+        write_test_info(test_info, epoch_losses[-1], os.path.join(cfg.OUTPUT_PATH, "best_results1.txt"))
         plot_loss(epoch_losses)
-        torch.save(mainModel.state_dict(), os.path.join(cfg.OUTPUT_PATH, 'model_weights.pth'))
+        torch.save(mainModel.state_dict(), os.path.join(cfg.OUTPUT_PATH, 'model_weights{}.pth'.format(epoch)))
