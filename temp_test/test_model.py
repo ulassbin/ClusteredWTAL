@@ -23,6 +23,9 @@ testLogger = CustomLogger(name='test_model')
 import torch
 from torch.utils.data import DataLoader
 
+import argparse
+from torch.utils.tensorboard import SummaryWriter
+
 def custom_collate(batch):
     data = [item[0] for item in batch]
     label = [item[1] for item in batch]
@@ -172,116 +175,152 @@ class ActionLoss(nn.Module):
 
 
 
-num_videos=None
-simple_loader = loader.simpleLoader(cfg.VID_PATH, cfg.CLUSTER_PATH)
-videofiles, feature_dim, frame_lengths, max_len = simple_loader.load_videos()
-assert(feature_dim == cfg.FEATS_DIM)
-cluster_labels, cluster_centers, cluster_center_indexes = simple_loader.load_cluster_information()
+if __name__ == '__main__':
 
-print('Feature dim {}, videos {}'.format(feature_dim, len(videofiles)))
-print('Cluster labels {}, cluster_centers {}, cluster_center_indexes {}'.format(cluster_labels.shape, cluster_centers.shape, cluster_center_indexes.shape))
+    # Parse the input arguments, specificaly get the expirment name from first argument
+    parser = argparse.ArgumentParser(description='Run experiment with a specified name.')
+    parser.add_argument(
+        'exp_name',
+        type=str,
+        nargs='?',  # Makes the argument optional
+        default='default',
+        help='Name of the experiment (default: "default_experiment")'
+    )
+    args = parser.parse_args()
+    
+    # Access the experiment name
+    exp_name = args.exp_name
+    print(f'Running experiment: {exp_name}')
 
-mainModel = CrashingVids(cfg, max_len, torch.tensor(cluster_centers).to('cuda'))
+    writer = SummaryWriter(log_dir=os.path.join(cfg.OUTPUT_PATH, 'runs', exp_name))
+    num_videos=None
+    simple_loader = loader.simpleLoader(cfg.VID_PATH, cfg.CLUSTER_PATH)
+    videofiles, feature_dim, frame_lengths, max_len = simple_loader.load_videos()
+    assert(feature_dim == cfg.FEATS_DIM)
+    cluster_labels, cluster_centers, cluster_center_indexes = simple_loader.load_cluster_information()
 
+    print('Feature dim {}, videos {}'.format(feature_dim, len(videofiles)))
+    print('Cluster labels {}, cluster_centers {}, cluster_center_indexes {}'.format(cluster_labels.shape, cluster_centers.shape, cluster_center_indexes.shape))
 
-#with torch.no_grad():
-#    video_scores, actionness, cas, base_vid_scores, base_actionnes, base_cas, embeddings = mainModel(torch.tensor(videos[0:5,:]).to('cuda'))
-#    print(cas.shape)
-#    print(base_cas.shape)
-
-
-
-
-dataset = NpyFeature(data_path=cfg.DATA_PATH, mode='train',
-                    modal=cfg.MODAL, feature_fps=cfg.FEATS_FPS,
-                    num_segments=cfg.NUM_SEGMENTS, supervision='weak',
-                    class_dict=cfg.CLASS_DICT, seed=cfg.SEED, sampling='None', len_override=cfg.TEMPORAL_LENGTH)
-
-dataset.__getitem__(1)
-
-train_loader = torch.utils.data.DataLoader(dataset,
-        batch_size=cfg.BATCH_SIZE,
-        shuffle=True, num_workers=1, # cfg.NUM_WORKERS,
-        worker_init_fn=None, collate_fn=custom_collate)
+    mainModel = CrashingVids(cfg, max_len, torch.tensor(cluster_centers).to('cuda'))
 
 
-test_dataset = NpyFeature(data_path=cfg.DATA_PATH, mode='train', # change mode to test later!
-                    modal=cfg.MODAL, feature_fps=cfg.FEATS_FPS,
-                    num_segments=cfg.NUM_SEGMENTS, supervision='weak',
-                    class_dict=cfg.CLASS_DICT, seed=cfg.SEED, sampling='None', len_override=cfg.TEMPORAL_LENGTH)
-
-test_loader = torch.utils.data.DataLoader(test_dataset,
-        batch_size=5, # just for testing
-        shuffle=False, num_workers=1, # cfg.NUM_WORKERS,
-        worker_init_fn=None, collate_fn=custom_collate) # Ok that worked!
+    #with torch.no_grad():
+    #    video_scores, actionness, cas, base_vid_scores, base_actionnes, base_cas, embeddings = mainModel(torch.tensor(videos[0:5,:]).to('cuda'))
+    #    print(cas.shape)
+    #    print(base_cas.shape)
 
 
-#loader_iter = iter(train_loader)
 
 
-# Define a function to write items in test info to a file
-# dont overwrite each time append!
-def write_test_info(test_info, loss, file_path):
-    with open(file_path, 'a') as f:
-        f.write("Step: {}\n".format(test_info["step"][-1]))
-        #f.write("Test_acc: {:.4f}\n".format(test_info["test_acc"][-1]))
-        f.write("average_mAP: {:.4f}\n".format(test_info["average_mAP"][-1]))
-        tIoU_thresh = np.linspace(0.1, 0.7, 7)
-        for i in range(len(tIoU_thresh)):
-            f.write("mAP@{}: {}\n".format(tIoU_thresh[i], test_info["mApAll"][-1][i]))
-        f.write('Loss: {}'.format(loss))
-        f.close()
+    dataset = NpyFeature(data_path=cfg.DATA_PATH, mode='train',
+                        modal=cfg.MODAL, feature_fps=cfg.FEATS_FPS,
+                        num_segments=cfg.NUM_SEGMENTS, supervision='weak',
+                        class_dict=cfg.CLASS_DICT, seed=cfg.SEED, sampling='None', len_override=cfg.TEMPORAL_LENGTH)
+
+    dataset.__getitem__(1)
+
+    train_loader = torch.utils.data.DataLoader(dataset,
+            batch_size=cfg.BATCH_SIZE,
+            shuffle=True, num_workers=1, # cfg.NUM_WORKERS,
+            worker_init_fn=None, collate_fn=custom_collate)
 
 
-#data, label, temp_annotations, something, vid_num_seg = next(loader_iter)
-#print("Data shape {} label shape {}".format(data.shape, label.shape))
-#print('Temp temp_annotations {}'.format(vid_num_seg))
-cfg.LR = eval(cfg.LR)
-optimizer = torch.optim.Adam(mainModel.parameters(), lr=cfg.LR[0],
-    betas=(0.9, 0.999), weight_decay=0.0005)
+    test_dataset = NpyFeature(data_path=cfg.DATA_PATH, mode='train', # change mode to test later!
+                        modal=cfg.MODAL, feature_fps=cfg.FEATS_FPS,
+                        num_segments=cfg.NUM_SEGMENTS, supervision='weak',
+                        class_dict=cfg.CLASS_DICT, seed=cfg.SEED, sampling='None', len_override=cfg.TEMPORAL_LENGTH)
 
-autoLoss = AutoLabelClusterCrossEntropyLoss()
-criterion = ActionLoss() # Ok this is not correct, we need to define a new loss function
-criterion_list = {'action': criterion, 'auto': autoLoss}
+    test_loader = torch.utils.data.DataLoader(test_dataset,
+            batch_size=5, # just for testing
+            shuffle=False, num_workers=1, # cfg.NUM_WORKERS,
+            worker_init_fn=None, collate_fn=custom_collate) # Ok that worked!
 
 
-# Define a function to plot loss functions wait for 5-10 seconds and then close the plot
-def plot_loss(losses):
-    plt.plot(losses)
-    plt.show(block=False)
-    plt.pause(5)
-    plt.close()
+    #loader_iter = iter(train_loader)
 
-# Training loop
-# Keep a history of epochwise losses
-epoch_losses = []
-test_info = {"step": [], "average_mAP": [], 'mApAll': []}
-for epoch in range(cfg.NUM_EPOCHS):
-    testLogger.log("----Epoch {}----".format(epoch), logging.ERROR)
-    loader_iter = iter(train_loader) # Reset iterator
-    epoch_loss = 0
-    batch_losses = []
-    print('Passed here')
-    for step, batch in enumerate(loader_iter, start=1): # start is just for step variable!
-        # Skipping lr adjustment.
-        testLogger.log("Training {}%".format(step/len(train_loader) * 100.0))
-        cost, cost_list = train_one_step(mainModel, batch, optimizer, criterion_list, cfg) # In future visualize the cost_list
-        batch_losses.append(cost.item())
-        epoch_loss += cost.item()
-        if step == 1 or step % cfg.PRINT_FREQ == 0:
-            # write an inline if statement to calculate mean_epoch_loss, if length of epoch_losses is 0 return 0
-            mean_epoch_loss = np.mean(epoch_losses) if len(epoch_losses) > 0 else 0
-            testLogger.log(('Epoch: [{0:04d}/{1}]\t' \
-                    'Batch Loss {loss:.4f} Epoch Loss({loss_avg:.4f})\t'.format(
-                    epoch, len(train_loader), loss=np.mean(batch_losses), loss_avg=mean_epoch_loss)), logging.WARNING)
-    epoch_losses.append(epoch_loss)
-    if epoch % cfg.TEST_FREQ == (cfg.TEST_FREQ - 1):
-        testLogger.log("Testing at step {}".format(epoch))
-        test_info = test_all(mainModel, cfg, test_loader, test_info, epoch)
-        # Write the test results to a file, also print Iou Map@0.5
-        #print("Test info is {}".format(test_info))
-        print("Test info average mAP is {}".format(test_info['average_mAP'][-1]))
-        print("Test info mApAll is {}".format(test_info['mApAll'][-1]))
-        write_test_info(test_info, epoch_losses[-1], os.path.join(cfg.OUTPUT_PATH, "best_results1.txt"))
-        plot_loss(epoch_losses)
-        torch.save(mainModel.state_dict(), os.path.join(cfg.OUTPUT_PATH, 'model_weights{}.pth'.format(epoch)))
+
+    # Define a function to write items in test info to a file
+    # dont overwrite each time append!
+    def write_test_info(test_info, loss, file_path, writer):
+        with open(file_path, 'a') as f:
+            f.write("Step: {}\n".format(test_info["step"][-1]))
+            #f.write("Test_acc: {:.4f}\n".format(test_info["test_acc"][-1]))
+            f.write("average_mAP: {:.4f}\n".format(test_info["average_mAP"][-1]))
+            writer.add_scalar('mAP/average', test_info["average_mAP"][-1], test_info["step"][-1])
+            tIoU_thresh = np.linspace(0.1, 0.7, 7)
+            for i in range(len(tIoU_thresh)):
+                f.write("mAP@{}: {}\n".format(tIoU_thresh[i], test_info["mApAll"][-1][i]))
+                writer.add_scalar('mAP/{}'.format(tIoU_thresh[i]), test_info["mApAll"][-1][i], test_info["step"][-1])
+            f.write('Loss: {}'.format(loss))
+            f.close()
+
+
+    #data, label, temp_annotations, something, vid_num_seg = next(loader_iter)
+    #print("Data shape {} label shape {}".format(data.shape, label.shape))
+    #print('Temp temp_annotations {}'.format(vid_num_seg))
+    cfg.LR = eval(cfg.LR)
+    optimizer = torch.optim.Adam(mainModel.parameters(), lr=cfg.LR[0],
+        betas=(0.9, 0.999), weight_decay=0.0005)
+
+    autoLoss = AutoLabelClusterCrossEntropyLoss()
+    criterion = ActionLoss() # Ok this is not correct, we need to define a new loss function
+    criterion_list = {'action': criterion, 'auto': autoLoss}
+
+
+    # Define a function to plot loss functions wait for 5-10 seconds and then close the plot
+    def plot_loss(losses):
+        plt.plot(losses)
+        plt.show(block=False)
+        plt.pause(5)
+        plt.close()
+
+    # Training loop
+    # Keep a history of epochwise losses
+    epoch_losses = []
+    
+    train_total_steps = len(train_loader)
+    test_total_steps = len(test_loader)
+    test_info = {"step": [], "average_mAP": [], 'mApAll': []}
+    for epoch in range(cfg.NUM_EPOCHS):
+        testLogger.log("----Epoch {}----".format(epoch), logging.ERROR)
+        loader_iter = iter(train_loader) # Reset iterator
+        
+        
+        epoch_loss = 0
+        batch_losses = []
+        #criterion_list = {'action': criterion, 'auto': autoLoss}
+        epoch_loss_list = []
+        for step, batch in enumerate(loader_iter, start=1): # start is just for step variable!
+            # Skipping lr adjustment.
+            testLogger.log("Training {}%".format(step/len(train_loader) * 100.0))
+            cost, cost_list = train_one_step(mainModel, batch, optimizer, criterion_list, cfg) # In future visualize the cost_list
+            batch_losses.append(cost.item())
+            epoch_loss += cost.item()
+            epoch_loss_list.append([c.item() for c in cost_list])
+            if step == 1 or step % cfg.PRINT_FREQ == 0:
+                # write an inline if statement to calculate mean_epoch_loss, if length of epoch_losses is 0 return 0
+                mean_epoch_loss = np.mean(epoch_losses) if len(epoch_losses) > 0 else 0
+                testLogger.log(('Epoch: [{0:04d}/{1}]\t' \
+                        'Batch Loss {loss:.4f} Epoch Loss({loss_avg:.4f})\t'.format(
+                        epoch, len(train_loader), loss=np.mean(batch_losses), loss_avg=mean_epoch_loss)), logging.WARNING)
+                writer.add_scalar('Loss/train', np.mean(batch_losses), epoch * train_total_steps + step)
+                writer.flush() 
+        
+                
+        epoch_losses.append(epoch_loss)
+        writer.add_scalar('Loss/train_epoch', epoch_loss, epoch)
+        writer.add_scalar('Loss/train_epoch_action', np.mean([loss_list[0] for loss_list in epoch_loss_list ]), epoch)
+        writer.add_scalar('Loss/train_epoch_auto', np.mean([loss_list[1] for loss_list in epoch_loss_list ]), epoch)
+        if epoch % cfg.TEST_FREQ == (cfg.TEST_FREQ - 1):
+            testLogger.log("Testing at step {}".format(epoch))
+            test_info = test_all(mainModel, cfg, test_loader, test_info, epoch)
+            # Write the test results to a file, also print Iou Map@0.5
+            #print("Test info is {}".format(test_info))
+            print("Test info average mAP is {}".format(test_info['average_mAP'][-1]))
+            print("Test info mApAll is {}".format(test_info['mApAll'][-1]))
+            write_test_info(test_info, epoch_losses[-1], os.path.join(cfg.OUTPUT_PATH, "best_results1.txt", writer))
+            plot_loss(epoch_losses)
+            torch.save(mainModel.state_dict(), os.path.join(cfg.OUTPUT_PATH, 'model_weights{}.pth'.format(epoch)))
+        writer.flush() 
+    writer.close()

@@ -306,7 +306,6 @@ def cuda_fft_distances(filenames, data_loader,  feature_size, batch=32):
 
 
 def compute_cluster_distances(x, cluster_centers):
-    print('X shape ', x.shape)
     batch_size, temporal_length, feature_dim = x.shape  # (batch_size, temporal_length, feature_dim)
     centers, cent_length, cent_feature_dim = cluster_centers.shape  # (centers, temporal_length, feature_dim)
 
