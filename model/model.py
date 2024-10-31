@@ -94,10 +94,11 @@ class TransformerClusterFusion(nn.Module):
         super(TransformerClusterFusion, self).__init__()
         self.temporal_length = cfg.TEMPORAL_LENGTH
         self.feature_dim = cfg.FEATS_DIM
-        self.num_cluster_centers = cluster_centers.shape[0]
+        self.num_cluster = cluster_centers.shape[0]
         self.scale = nn.Parameter(torch.ones(1)).to('cuda')  # Learnable scale parameter
         self.cluster_centers = cluster_centers  # Shape: (num_cluster_centers, temporal_length, feature_dim)
-
+        self.cluster_centers = cluster_centers.view(self.num_cluster, -1, self.feature_dim) # This is similar vectors with x.
+        self.cluster_centers = self.cluster_centers.to(dtype=torch.float32, device='cuda')
         # Transformer Encoder Layer
         self.transformer_encoder_layer = nn.TransformerEncoderLayer(
             d_model=cfg.FEATS_DIM,
@@ -213,7 +214,7 @@ class CrashingVids(nn.Module):
         return embeddings
 
     def getClusterEmbeddings(self):
-        #print("Centers shape {}".format(self.cluster_centers.shape))
+        print("Centers shape {}".format(self.cluster_centers.shape))
         x = self.cluster_centers.reshape(-1,self.temporal_length, self.feature_dim)
         #print('Cluster centers shape is ', x.shape)
         embeddings, cas, actionness = self.actionness_module(x)
