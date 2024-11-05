@@ -104,7 +104,7 @@ class TransformerClusterFusion(nn.Module):
             d_model=cfg.FEATS_DIM,
             nhead=8,  # Number of attention heads
             dim_feedforward=2048,
-            dropout=0.1,
+            dropout=0.5,
             batch_first=True
         )
         self.transformer_encoder = nn.TransformerEncoder(self.transformer_encoder_layer, num_layers=4)

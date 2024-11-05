@@ -60,20 +60,21 @@ def train_one_step(net, batch, optimizer, criterion_list, cfg):
     video_scores, actionness, cas, base_vid_scores, base_actionnes, base_cas, embeddings = net(data)
     cost = 0
     cost_list = []
+    optimizer.zero_grad()
     for key in criterion_list.keys():
         # If key contains auto term
         if 'auto' in key: # Auto keys are self supervised losses
-            self_learn_scale = cfg.SELF_LEARN_SCALE
+            # self_learn_scale = cfg.SELF_LEARN_SCALE
             embeddings_distilled = torch.mean(embeddings, dim=1) # Distill the embeddings from temporal dims # Rather than mean select top 10 etc.., or PCA, detect most important moments!
             loss, pseudo_labels = criterion_list[key](embeddings_distilled, cluster_embeddings_distilled)
-            current_cost = loss # We could also use previous iterations of network
+            current_cost = cfg.SELF_LEARN_SCALE * loss # We could also use previous iterations of network
         else:
             current_cost = criterion_list[key](video_scores, label)
         #print("Current cost  from {} is {}".format(key, current_cost))
         cost_list.append(current_cost)
         cost += current_cost
-    cost = criterion(video_scores, label)
-    optimizer.zero_grad()
+    #cost = criterion(video_scores, label)
+    #optimizer.zero_grad()
     cost.backward()
     optimizer.step()
     return cost, cost_list
@@ -251,7 +252,8 @@ if __name__ == '__main__':
             tIoU_thresh = np.linspace(0.1, 0.7, 7)
             for i in range(len(tIoU_thresh)):
                 f.write("mAP@{}: {}\n".format(tIoU_thresh[i], test_info["mApAll"][-1][i]))
-                writer.add_scalar('mAP/{}'.format(tIoU_thresh[i]), test_info["mApAll"][-1][i], test_info["step"][-1])
+                print('Items to be written {} {}'.format(test_info["mApAll"][-1][i], test_info["step"][-1]))
+                writer.add_scalar('mAP/{}'.format(tIoU_thresh[i]), test_info["mApAll"][-1][i][0], test_info["step"][-1])
             f.write('Loss: {}'.format(loss))
             f.close()
 
@@ -265,9 +267,9 @@ if __name__ == '__main__':
 
     autoLoss = AutoLabelClusterCrossEntropyLoss()
     criterion = ActionLoss() # Ok this is not correct, we need to define a new loss function
-    criterion_list = {'action': criterion, 'auto': autoLoss}
-
-
+    #criterion_list = {'action': criterion, 'auto': autoLoss}
+    #criterion_list = {'action': criterion, 'action2': criterion}
+    criterion_list = {'auto': autoLoss, 'auto2': autoLoss}
     # Define a function to plot loss functions wait for 5-10 seconds and then close the plot
     def plot_loss(losses):
         plt.plot(losses)
@@ -278,15 +280,12 @@ if __name__ == '__main__':
     # Training loop
     # Keep a history of epochwise losses
     epoch_losses = []
-    
     train_total_steps = len(train_loader)
     test_total_steps = len(test_loader)
     test_info = {"step": [], "average_mAP": [], 'mApAll': []}
     for epoch in range(cfg.NUM_EPOCHS):
         testLogger.log("----Epoch {}----".format(epoch), logging.ERROR)
         loader_iter = iter(train_loader) # Reset iterator
-        
-        
         epoch_loss = 0
         batch_losses = []
         #criterion_list = {'action': criterion, 'auto': autoLoss}
@@ -305,9 +304,7 @@ if __name__ == '__main__':
                         'Batch Loss {loss:.4f} Epoch Loss({loss_avg:.4f})\t'.format(
                         epoch, len(train_loader), loss=np.mean(batch_losses), loss_avg=mean_epoch_loss)), logging.WARNING)
                 writer.add_scalar('Loss/train', np.mean(batch_losses), epoch * train_total_steps + step)
-                writer.flush() 
-        
-                
+                writer.flush()
         epoch_losses.append(epoch_loss)
         writer.add_scalar('Loss/train_epoch', epoch_loss, epoch)
         writer.add_scalar('Loss/train_epoch_action', np.mean([loss_list[0] for loss_list in epoch_loss_list ]), epoch)
@@ -319,7 +316,7 @@ if __name__ == '__main__':
             #print("Test info is {}".format(test_info))
             print("Test info average mAP is {}".format(test_info['average_mAP'][-1]))
             print("Test info mApAll is {}".format(test_info['mApAll'][-1]))
-            write_test_info(test_info, epoch_losses[-1], os.path.join(cfg.OUTPUT_PATH, "best_results1.txt", writer))
+            write_test_info(test_info, epoch_losses[-1], os.path.join(cfg.OUTPUT_PATH, "best_results1.txt"), writer)
             plot_loss(epoch_losses)
             torch.save(mainModel.state_dict(), os.path.join(cfg.OUTPUT_PATH, 'model_weights{}.pth'.format(epoch)))
         writer.flush() 
