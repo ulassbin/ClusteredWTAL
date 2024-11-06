@@ -49,7 +49,7 @@ def visualize_distance_heatmap(distance_matrix, labels, title="Distance Matrix H
     plt.show()
 
 
-def visualize_clustering_heatmap(distance_matrix, labels, title="Clustering Heatmap"):
+def visualize_clustering_heatmap(distance_matrix, labels, title="Clustering Heatmap", save_dir='figures/heatmap.png'):
     """
     Visualize clustering assignments using a heatmap of the distance matrix.
 
@@ -81,25 +81,31 @@ def visualize_clustering_heatmap(distance_matrix, labels, title="Clustering Heat
     
     plt.tight_layout()
     plt.show()
+    # how to save these plots
+    plt.savefig(save_dir)
 
 
 
 
-# --- Config ---
-data_dir = '/home/ulas/Documents/Datasets/CoLA/data/THUMOS14/features/train/rgb'
+
+# --- Config --- /abyss/home/THUMOS14/features/train/rgb
+#data_dirs = ['/abyss/home/THUMOS14/features/train/rgb']
+data_dirs = ['/abyss/home/THUMOS14/features/train/rgb', '/abyss/home/THUMOS14/features/test/rgb']
+#data_dir = '/home/ulas/Documents/Datasets/CoLA/data/THUMOS14/features/train/rgb'
 cluster_dir = './data'
 load_labels = False
 cluster_method='affinity'
 num_videos = None
 distance_comp_batch = 30 # 30
+quick_run = False
 # Load the videos (specify the number of videos to load, or None to load all)
-simple_loader = loader.simpleLoader(data_dir, cluster_dir)
-videos, feature_dim, lengths, filenames = simple_loader.load_videos()
+simple_loader = loader.simpleLoader(data_dirs, cluster_dir, quick_run)
+video_files, feature_dim, lengths, max_len = simple_loader.load_videos()
 helper.feature_dim = clm.feature_dim = feature_dim
 
 plt.plot(lengths)
 plt.show()
-mainLogger.log("Videos shape {}, {}, features {}".format(len(videos), videos.shape, feature_dim), logging.WARNING)
+#mainLogger.log("Videos shape {}, {}, features {}".format(len(videos), videos.shape, feature_dim), logging.WARNING)
 cluster_centers = None
 if(load_labels):
     labels, cluster_centers, cluster_center_indexes = loader.load_cluster_information()
@@ -107,20 +113,21 @@ else:
     if(cluster_method == 'DBSCAN'):
         labels = clm.custom_dbscan(videos, eps=0.5*1e-4, min_samples=2, custom_distance_func=helper.fft_distance_2d)
     elif(cluster_method == 'kmedoids'):
-        distance_matrix = helper.cuda_fft_distances(videos, feature_dim, distance_comp_batch) # Second param is batch
+        distance_matrix = helper.cuda_fft_distances(video_files, simple_loader, feature_dim, distance_comp_batch) # Second param is batch
         clm.visualize_distance_matrix(distance_matrix)
+        exit()
         cluster_center_indexes, labels = clm.k_medoids(distance_matrix, k=10, max_iter = 200) 
         #visualize_distance_heatmap(distance_matrix, labels, title="Distance Matrix Heatmap")
         visualize_clustering_heatmap(distance_matrix, labels, title="Clustering Heatmap")
-        cluster_centers = videos[cluster_center_indexes]
+        center_files = video_files[cluster_center_indexes]
+        cluster_centers = simple_loader.load_mini_batch(center_files)
     else: # Distance Precomputed method!
-        distance_matrix = helper.cuda_fft_distances(videos, feature_dim, distance_comp_batch) # Second param is batch
+        distance_matrix = helper.cuda_fft_distances(video_files, simple_loader, feature_dim, distance_comp_batch) # Second param is batch
         clm.visualize_distance_matrix(distance_matrix)
-        labels, cluster_center_indexes, cluster_centers = clm.custom_affinitypropagation(videos, distance_matrix) # We can do better in precomputation hg
+        labels, cluster_center_indexes, center_files = clm.custom_affinitypropagation(video_files, distance_matrix) # We can do better in precomputation hg
+        cluster_centers = simple_loader.load_mini_batch(center_files)
     np.save('data/cluster_labels.npy',labels)
 
-# Visualize the clusters using PCA
-clm.visualize_clusters_with_pca(videos, labels, title=cluster_method, method='tsne')
 
 if(cluster_centers is None or len(cluster_centers) == 0):
     cluster_center_indexes, cluster_centers = clm.getClusterCenters(videos, labels, distance_comp_batch,  helper.fft_distance_2d_batch) 
@@ -128,4 +135,11 @@ if(cluster_centers is None or len(cluster_centers) == 0):
 np.save('data/cluster_centers.npy', cluster_centers)
 np.save('data/cluster_center_indexes.npy', cluster_center_indexes)
 
-mainLogger.log("From {} videos Cluster indexes are {}".format(len(videos), cluster_center_indexes))
+mainLogger.log("From {} videos Cluster indexes are {}".format(len(video_files), cluster_center_indexes))
+
+try:
+    videos = simple_loader.load_mini_batch(video_files)
+    # Visualize the clusters using PCA
+    clm.visualize_clusters_with_pca(videos, labels, title=cluster_method, method='tsne')
+except:
+    print("PCA Visualization failed")

@@ -20,7 +20,7 @@ def set_seed(seed):
 
 
 class NpyFeature(data.Dataset):
-    def __init__(self, data_path, mode, modal, feature_fps, num_segments, sampling, class_dict, seed=-1, supervision='weak'):
+    def __init__(self, data_path, mode, modal, feature_fps, num_segments, sampling, class_dict, seed=-1, supervision='weak', len_override=None):
         if seed >= 0:
             set_seed(seed)
 
@@ -40,6 +40,8 @@ class NpyFeature(data.Dataset):
             self.feature_path = os.path.join(data_path, 'features', self.mode, self.modal)
 
         self.max_len = self.get_max_len(self.feature_path)
+        if(len_override is not None):
+            self.max_len = len_override
         if(sampling == 'None'):
             self.num_segments = self.max_len # If no sampling is specified, use the maximum length (basic padding)
         split_path = os.path.join(data_path, 'split_{}.txt'.format(self.mode))
@@ -234,22 +236,63 @@ class NpyFeature(data.Dataset):
 
 
 class simpleLoader():
-    def __init__(self, data_dir, cluster_path):
-        self.data_dir = data_dir
+    def __init__(self, data_dirs, cluster_path, quick_run=False):
+        # Accept a list of directories instead of a single directory
+        self.data_dirs = data_dirs if isinstance(data_dirs, list) else [data_dirs]
         self.cluster_path = cluster_path
+        self.feature_dim = 1024
+        self.max_len = 2000
+        self.quick_run = quick_run
+
+    def load_mini_batch(self, video_paths):
+        batch = np.zeros((len(video_paths), self.max_len*self.feature_dim))
+        for i, vid_name in enumerate(video_paths):
+            video = np.load(vid_name)
+            video = np.pad(video, ((0, self.max_len - video.shape[0]), (0, 0)), 'constant').flatten()
+            batch[i] = video
+        return batch
 
     def load_videos(self, num_videos=None):
-        video_files = [os.path.join(self.data_dir, f) for f in os.listdir(self.data_dir) if f.endswith('.npy')]
+        # Collect video files from all directories
+        print('Loading videos from {}'.format(self.data_dirs))
+        video_files = []
+        if self.quick_run:
+            max_iters = 30
+            print('Max iters ', max_iters)
+        count = 0
+        for data_dir in self.data_dirs:
+            video_files.extend([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.npy')])
+            if self.quick_run:
+                count += len([f for f in os.listdir(data_dir) if f.endswith('npy')])
+                if count >= max_iters:
+                    video_files = video_files[:max_iters]
+                    break
+        print('Loaded videos length ', len(video_files))
+        #exit()
+        # Check that there are videos to load
+        if not video_files:
+            raise ValueError("No video files found in the specified directories.")
         feature_dim = np.load(video_files[0]).shape[1]
-        # Limit the number of videos if specified
+        self.feature_dim = feature_dim
         if num_videos is not None and num_videos < len(video_files):
             video_files = random.sample(video_files, num_videos)
-        videos = [np.load(file) for file in video_files] # Flatten is necessary for DBSCAN
+        videos = [print(f"Loading file {i + 1}/{len(video_files)}: {file}") or np.load(file) for i, file in enumerate(video_files)]
         lengths = [video.shape[0] for video in videos]
         max_len = max(lengths)
-        padded_videos = np.array([np.pad(video, ((0, max_len - video.shape[0]), (0, 0)), 'constant').flatten() for video in videos])
-        logger.log("Max len is {}".format(max_len), logging.WARNING)
-        return padded_videos, feature_dim, lengths, max_len
+        self.max_len = max_len
+        print('Max length {} from {} of videos'.format(max_len, len(videos)))
+        videos = 0 # free memory
+        #for i, file in enumerate(video_files):
+        #    video = np.load(file)
+        #    video = np.pad(video, ((0, max_len - video.shape[0]), (0, 0)), 'constant').flatten()
+        #    print('Padded video {}/{}'.format(i, len(video_files)))
+        #    if i == 0:
+        #        padded_videos = np.zeros((len(video_files), max_len*feature_dim))
+        #    padded_videos[i] = video
+        #padded_videos = np.array([np.pad(video, ((0, max_len - video.shape[0]), (0, 0)), 'constant').flatten() for video in videos])
+        #print('Videos loaded')
+        #logger.log("Max len is {}".format(max_len), logging.WARNING)
+        return video_files, feature_dim, lengths, max_len
 
     def load_cluster_information(self):
         labels = cluster_centers = cluster_center_indexes = None
