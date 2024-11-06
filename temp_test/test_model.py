@@ -267,9 +267,9 @@ if __name__ == '__main__':
 
     autoLoss = AutoLabelClusterCrossEntropyLoss()
     criterion = ActionLoss() # Ok this is not correct, we need to define a new loss function
-    #criterion_list = {'action': criterion, 'auto': autoLoss}
+    criterion_list = {'action': criterion, 'auto': autoLoss}
     #criterion_list = {'action': criterion, 'action2': criterion}
-    criterion_list = {'auto': autoLoss, 'auto2': autoLoss}
+    #criterion_list = {'auto': autoLoss, 'auto2': autoLoss}
     # Define a function to plot loss functions wait for 5-10 seconds and then close the plot
     def plot_loss(losses):
         plt.plot(losses)
@@ -295,7 +295,7 @@ if __name__ == '__main__':
             testLogger.log("Training {}%".format(step/len(train_loader) * 100.0))
             cost, cost_list = train_one_step(mainModel, batch, optimizer, criterion_list, cfg) # In future visualize the cost_list
             batch_losses.append(cost.item())
-            epoch_loss += cost.item()
+            #epoch_loss += cost.item()
             epoch_loss_list.append([c.item() for c in cost_list])
             if step == 1 or step % cfg.PRINT_FREQ == 0:
                 # write an inline if statement to calculate mean_epoch_loss, if length of epoch_losses is 0 return 0
@@ -305,10 +305,11 @@ if __name__ == '__main__':
                         epoch, len(train_loader), loss=np.mean(batch_losses), loss_avg=mean_epoch_loss)), logging.WARNING)
                 writer.add_scalar('Loss/train', np.mean(batch_losses), epoch * train_total_steps + step)
                 writer.flush()
+        epoch_loss = np.sum(batch_losses)
         epoch_losses.append(epoch_loss)
         writer.add_scalar('Loss/train_epoch', epoch_loss, epoch)
-        writer.add_scalar('Loss/train_epoch_action', np.mean([loss_list[0] for loss_list in epoch_loss_list ]), epoch)
-        writer.add_scalar('Loss/train_epoch_auto', np.mean([loss_list[1] for loss_list in epoch_loss_list ]), epoch)
+        writer.add_scalar('Loss/train_epoch_action', np.sum([loss_list[0] for loss_list in epoch_loss_list ]), epoch)
+        writer.add_scalar('Loss/train_epoch_auto', np.sum([loss_list[1] for loss_list in epoch_loss_list ]), epoch)
         if epoch % cfg.TEST_FREQ == (cfg.TEST_FREQ - 1):
             testLogger.log("Testing at step {}".format(epoch))
             test_info = test_all(mainModel, cfg, test_loader, test_info, epoch)

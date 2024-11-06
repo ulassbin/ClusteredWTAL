@@ -7,11 +7,12 @@ import numpy as np
 class ActionLoss(nn.Module):
     def __init__(self):
         super(ActionLoss, self).__init__()
-        self.ce_criterion = nn.CrossEntropyLoss()
+        self.bce_criterion = nn.BCELoss()
 
     def forward(self, video_scores, label):
+        print('Video scores shape {}, label shape {}'.format(video_scores.shape, label.shape))
         label = label / torch.sum(label, dim=1, keepdim=True)
-        loss = self.ce_criterion(video_scores, label)
+        loss = self.bce_criterion(video_scores, label)
         return loss
 
 class ContrastiveClusterLoss(nn.Module):
