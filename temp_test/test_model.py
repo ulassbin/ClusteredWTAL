@@ -11,6 +11,7 @@ sys.path.append(os.path.join(project_root, 'model'))
 from model import *
 from loss import *
 import helper_functions as helper
+import PropGenie as genie
 import data_loader as loader
 from data_loader import NpyFeature
 import torch
@@ -120,6 +121,7 @@ def visualize_cas(cas, actionness, max_plots=5):
 
 @torch.no_grad()
 def test_all(net, cfg, test_loader, test_info, step):
+    seconds_to_index = cfg.FEATS_FPS / 16
     net.eval()
     # data, label, temp_anno, proposal_label, file_name, unpadded_video_length
     # for test results format should be file_name, final_proposals, final_average_iou, vid_correspondences
@@ -132,9 +134,9 @@ def test_all(net, cfg, test_loader, test_info, step):
         data, label = data.cuda(), torch.tensor(label).cuda()
         vid_num_seg = vid_num_seg[0]
         video_scores, actionness, cas, base_vid_scores, base_actionnes, base_cas, embeddings = net(data) # this works with batch size already
-        proposals = helper.cas_to_proposals(cas, cfg.CAS_THRESH, cfg.MIN_PROPOSAL_LENGTH_INDEXWISE, cfg.FEATS_FPS)
-        filtered_proposals = helper.actionness_filter_proposals(proposals, actionness, cfg)
-        final_proposals = helper.nms(filtered_proposals, cfg.NMS_THRESH) # non-maximum suppression
+        proposals = genie.cas_to_proposals(cas, cfg.CAS_THRESH, cfg.MIN_PROPOSAL_LENGTH_INDEXWISE, cfg.FEATS_FPS, genie.config)
+        filtered_proposals = genie.actionness_filter_proposals(proposals, actionness, cfg)
+        final_proposals = genie.nms(filtered_proposals, cfg.NMS_THRESH, genie.config, cas, seconds_to_index) # non-maximum suppression
         average_iou, vid_correspondences = helper.calculate_IoU(final_proposals, label_proposals)
         #if(print_count % 2 == 0):
         testLogger.log('Test Progress {}%'.format(print_count/len(test_loader) * 100.0), logging.WARNING)
@@ -142,7 +144,7 @@ def test_all(net, cfg, test_loader, test_info, step):
         testLogger.log("Filtered proposals length is {}".format(count_proposals(filtered_proposals)), logging.WARNING)
         testLogger.log('NMS      proposals length is {}'.format(count_proposals(final_proposals)), logging.WARNING)
         testLogger.log("Batch average iou is {}".format(np.mean(average_iou)), logging.ERROR)
-        #visualize_cas(cas, actionness)
+        visualize_cas(cas, actionness)
         # Ok again for this lets try naive approach first
         for batch_id in range(batch_size): # Flatten by batch
             for example in vid_correspondences[batch_id]: # for every match in a specific batch
@@ -233,7 +235,7 @@ if __name__ == '__main__':
                         class_dict=cfg.CLASS_DICT, seed=cfg.SEED, sampling='None', len_override=cfg.TEMPORAL_LENGTH)
 
     test_loader = torch.utils.data.DataLoader(test_dataset,
-            batch_size=5, # just for testing
+            batch_size=2, #  5 just for testing
             shuffle=False, num_workers=1, # cfg.NUM_WORKERS,
             worker_init_fn=None, collate_fn=custom_collate) # Ok that worked!
 
