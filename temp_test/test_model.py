@@ -235,7 +235,7 @@ if __name__ == '__main__':
                         class_dict=cfg.CLASS_DICT, seed=cfg.SEED, sampling='None', len_override=cfg.TEMPORAL_LENGTH)
 
     test_loader = torch.utils.data.DataLoader(test_dataset,
-            batch_size=2, #  5 just for testing
+            batch_size=10, #  5 just for testing
             shuffle=False, num_workers=1, # cfg.NUM_WORKERS,
             worker_init_fn=None, collate_fn=custom_collate) # Ok that worked!
 
