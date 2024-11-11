@@ -4,16 +4,17 @@ from easydict import EasyDict as edict
 
 cfg = edict()
 
+cfg.MERGING = False
 cfg.GPU_ID = '0'
 cfg.SELF_LEARN_SCALE = 0.1
 cfg.FUSION = 'transformer'
-cfg.LR = '[0.0001]*500'
+cfg.LR = '[0.0001]*10000'
 cfg.NUM_ITERS = len(eval(cfg.LR))
-cfg.NUM_EPOCHS = 1000
+cfg.NUM_EPOCHS = 10000
 cfg.NUM_CLASSES = 20
 cfg.MODAL = 'rgb'
-cfg.TEST_FREQ = 2 #25 # Every 5 epoch
-cfg.PRINT_FREQ = 2
+cfg.TEST_FREQ = 25 #25 # Every 5 epoch
+cfg.PRINT_FREQ = 5
 cfg.FEATS_DIM = 1024
 cfg.BATCH_SIZE = 25
 cfg.VID_PATH = '/abyss/home/THUMOS14/features/train/rgb'

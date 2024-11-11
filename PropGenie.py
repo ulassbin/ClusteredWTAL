@@ -140,10 +140,10 @@ def cas_to_proposals(cas, threshold_list, min_proposal_length, fps, score_config
             #print('Scores are', scores)
             scored_proposals = combine_scorings(scores, score_weights)
             #print("Scored proposals len ", len(scored_proposals))
-            proposals[k].append(scored_proposals) # Assign computed proposal for batch k!
-            print("Prop batch {}, classes {}".format(len(proposals), len(proposals[0])))
-            print("Batch class {}, scored {}".format(len(batch_proposal), len(scored_proposals)))
-    print("Prop batch {}, classes {}".format(len(proposals), len(proposals[0])))
+            proposals[k] = scored_proposals # Assign computed proposal for batch k!
+            #print("Prop batch {}, classes {}".format(len(proposals), len(proposals[0])))
+            #print("Batch class {}, scored {}".format(len(batch_proposal), len(scored_proposals)))
+    #print("Prop batch {}, classes {}".format(len(proposals), len(proposals[0])))
     return proposals # Proposals is a list with batch, num_classes, proposals
 
 
@@ -237,13 +237,13 @@ def actionness_filter_proposals(proposals, actionness, cfg):
     filtered_proposals = [ [[] for _ in range(num_classes)] for _ in range(num_batch)]
     assert num_batch == len(proposals), "Number of proposals and actionness should match"
     assert num_classes == len(proposals[0]), "Number of classes in proposals and config should match"
-    print('Num batches {}, num_classes {}, num_proposals {}'.format(len(proposals), [len(proposals[i]) for i in range(len(proposals))], [len(proposals[0][i]) for i in range(len(proposals[0]))]))
+    #print('Num batches {}, num_classes {}, num_proposals {}'.format(len(proposals), [len(proposals[i]) for i in range(len(proposals))], [len(proposals[0][i]) for i in range(len(proposals[0]))]))
     for batch_id in range(num_batch):
         batch_proposal = proposals[batch_id]
         batch_actionness = actionness[batch_id]
         for class_id in range(len(batch_proposal)):
-            print("Len of batch proposal ", len(batch_proposal))
-            print("Batch_prop class ", (batch_proposal[class_id]))
+            #print("Len of batch proposal ", len(batch_proposal))
+            #print("Batch_prop class ", (batch_proposal[class_id]))
             for proposal in batch_proposal[class_id]:
                 print("Prop ", proposal)
                 start_frame = int(proposal[1] * seconds_to_index)
