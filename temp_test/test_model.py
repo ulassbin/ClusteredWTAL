@@ -135,6 +135,7 @@ def test_all(net, cfg, test_loader, test_info, step):
         vid_num_seg = vid_num_seg[0]
         video_scores, actionness, cas, base_vid_scores, base_actionnes, base_cas, embeddings = net(data) # this works with batch size already
         proposals = genie.cas_to_proposals(cas, cfg.CAS_THRESH, cfg.MIN_PROPOSAL_LENGTH_INDEXWISE, cfg.FEATS_FPS, genie.config)
+        print("Num batch {} num_classes {} ".format(data.shape[0], cas.shape[2]))
         filtered_proposals = genie.actionness_filter_proposals(proposals, actionness, cfg)
         final_proposals = genie.nms(filtered_proposals, cfg.NMS_THRESH, genie.config, cas, seconds_to_index) # non-maximum suppression
         average_iou, vid_correspondences = helper.calculate_IoU(final_proposals, label_proposals)
