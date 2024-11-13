@@ -1,6 +1,16 @@
 import numpy as np
 import torch
 import copy
+import unittest
+
+
+def getProposalItemCount(proposals):
+    count = 0
+    for batch_id in range(len(proposals)):
+        for class_id in range(len(proposals[batch_id])):
+            for proposal in proposals[batch_id][class_id]:
+                count += 1
+    return count
 
 
 
@@ -11,38 +21,38 @@ def wide_short_scoring(batch_proposals, alpha=0.1):
     scored_proposals = [[] for _ in range(len(batch_proposals))]
     for i, prop in enumerate(batch_proposals):
         for j, item in enumerate(prop):
-            if(len(item) != 4):
+            if(len(item) != 5):
                 continue
-            class_id, start, end, data = item
+            class_id, start, end, threshold, data = item
             base_data = data[0]
             wide_data = data[-1]
             base_score = np.mean(base_data)
             edge_score = (np.sum(wide_data) - np.sum(base_data)) / (len(wide_data) - len(base_data) + 1e-6)
             score = base_score - alpha * edge_score # This will score the proposal, minus the edges. Making sharp edges less likely to be selected.
-            scored_proposals[i].append([class_id, start, end, score])
+            scored_proposals[i].append([class_id, start, end, threshold, score])
     return scored_proposals
 
 def stddev_scoring(batch_proposals, alpha=1): # Favors consistent proposals over fragmented ones
     scored_proposals = [[] for _ in range(len(batch_proposals))]
     for i, prop in enumerate(batch_proposals):
         for j, item in enumerate(prop):
-            if(len(item) != 4):
+            if(len(item) != 5):
                 continue
-            class_id, start, end, data = item
+            class_id, start, end, threshold, data = item
             base_data = data[0]
             base_score = np.mean(base_data)
             base_stddev = np.std(base_data)
             score = base_score / (base_stddev + alpha) # Smoother penalties when using 1 rather than using epsilon
-            scored_proposals[i].append([class_id, start, end, score])
+            scored_proposals[i].append([class_id, start, end, threshold, score])
     return scored_proposals
 
 def median_shift_scoring(batch_proposals): # Favors proposals that are centered
     scored_proposals = [[] for _ in range(len(batch_proposals))]
     for i, prop in enumerate(batch_proposals):
         for j, item in enumerate(prop):
-            if(len(item) != 4):
+            if(len(item) != 5):
                 continue
-            class_id, start, end, data = item
+            class_id, start, end, threshold, data = item
             base_data = data[0]
             wide_data = data[-1]
             base_score = np.mean(base_data)
@@ -61,7 +71,7 @@ def median_shift_scoring(batch_proposals): # Favors proposals that are centered
             median_wide_index = sorted_indices[len(wide_data) // 2]
             shift = abs(median_base_index - median_wide_index) / (time_length + 1e-6)
             score = -shift # Try to minimize the shift
-            scored_proposals[i].append([class_id, start, end, score])
+            scored_proposals[i].append([class_id, start, end, threshold, score])
     return scored_proposals
 
 
@@ -79,8 +89,7 @@ def combine_scorings(score_list, scoring_weights):
             score = 0
             for k in range(num_scores):
                 score += scoring_weights[k] * score_list[k][i][j][-1]
-            #                  class_id,               start,                  end,                    sum
-            final_scores[i].append([score_list[0][i][j][0], score_list[0][i][j][1], score_list[0][i][j][2], score])
+            final_scores[i].append([score_list[0][i][j][0], score_list[0][i][j][1], score_list[0][i][j][2], score_list[0][i][j][3], score])
     return final_scores
 
 def cas_to_proposals(cas, threshold_list, min_proposal_length, fps, score_config):
@@ -116,7 +125,7 @@ def cas_to_proposals(cas, threshold_list, min_proposal_length, fps, score_config
                                 wide_start = max(0, start - int(borders * current_length))
                                 wide_end = min(time_length-1, end + int(borders * current_length))
                                 proposal_data = [cas[k,start:end+1,i].cpu().numpy(), cas[k,wide_start:wide_end+1,i].cpu().numpy()]
-                                batch_proposal[i].append([i, start*index_to_seconds, end*index_to_seconds, copy.deepcopy(proposal_data)])
+                                batch_proposal[i].append([i, start*index_to_seconds, end*index_to_seconds, threshold, copy.deepcopy(proposal_data)])
                                 #print("Adding Proposal for class {} start {} end {}".format(i, start*index_to_seconds, end*index_to_seconds))
                             # reset start position
                             start = -1
@@ -127,20 +136,19 @@ def cas_to_proposals(cas, threshold_list, min_proposal_length, fps, score_config
                         wide_start = max(0, start - int(borders * current_length))
                         wide_end = min(time_length-1, end + int(borders * current_length))
                         proposal_data = [cas[k,start:end+1,i].cpu().numpy(), cas[k,wide_start:wide_end+1,i].cpu().numpy()]
-                        batch_proposal[i].append([i, start*index_to_seconds, end*index_to_seconds, copy.deepcopy(proposal_data)])
-                        #print("Adding Proposal for class {} start {} end {}".format(i, start*index_to_seconds, end*index_to_seconds))
+                        batch_proposal[i].append([i, start*index_to_seconds, end*index_to_seconds, threshold, copy.deepcopy(proposal_data)])
+                        print("Adding Proposal for class {} start {} end {}".format(i, start*index_to_seconds, end*index_to_seconds))
             # Now lets score the batch_proposals
             scored_proposals = [[] for _ in range(num_classes)]
             scores = []
             #print('Batch proposals are ', np.sum([len(proposal) for proposal in batch_proposal]))
             for j in range(len(score_metrics)):
                 item = score_metrics[j](batch_proposal)
-                #print('Score item is ', item)
                 scores.append(score_metrics[j](batch_proposal))
             #print('Scores are', scores)
             scored_proposals = combine_scorings(scores, score_weights)
-            #print("Scored proposals len ", len(scored_proposals))
-            proposals[k] = scored_proposals # Assign computed proposal for batch k!
+            #print("Scored proposals len ", [np.sum(len(it)) for it in scored_proposals])
+            proposals[k] += scored_proposals # Assign computed proposal for batch k!
             #print("Prop batch {}, classes {}".format(len(proposals), len(proposals[0])))
             #print("Batch class {}, scored {}".format(len(batch_proposal), len(scored_proposals)))
     #print("Prop batch {}, classes {}".format(len(proposals), len(proposals[0])))
@@ -152,8 +160,8 @@ def checkMerges(proposal1, proposal2, score_config, t_factor, cas_batch):
     # calculate the merged score, and if it is better than the individual scores
     # return the merged proposal, otherwise return the original proposal with the highest score
     # proposal is [class_id, start, end, score]
-    class_id1, start1, end1, score1 = proposal1
-    class_id2, start2, end2, score2 = proposal2
+    class_id1, start1, end1, threshold, score1 = proposal1
+    class_id2, start2, end2, threshold, score2 = proposal2
     # Check if the proposals are of the same class
     if class_id1 != class_id2:
         if score1 > score2:
@@ -245,11 +253,90 @@ def actionness_filter_proposals(proposals, actionness, cfg):
             #print("Len of batch proposal ", len(batch_proposal))
             #print("Batch_prop class ", (batch_proposal[class_id]))
             for proposal in batch_proposal[class_id]:
-                print("Prop ", proposal)
+                #print("Prop ", proposal)
                 start_frame = int(proposal[1] * seconds_to_index)
                 end_frame = int(proposal[2] * seconds_to_index)
-                print(" Len {}, start {}, end {}".format(batch_actionness.shape, start_frame, end_frame))
+                #print(" Len {}, start {}, end {}".format(batch_actionness.shape, start_frame, end_frame))
                 actionness_values = batch_actionness[start_frame:end_frame]
                 if np.mean(actionness_values.cpu().numpy()) > threshold:
                     filtered_proposals[batch_id][class_id].append(proposal)
     return filtered_proposals
+
+
+# Write a function to visualize cas values and proposals 
+def visualize(cas, proposals, fps, clr='r'):
+    import matplotlib.pyplot as plt
+    import math
+    index_to_seconds = 16 / fps
+    batch_size = cas.shape[0]
+    num_classes = cas.shape[2]
+    
+    # Compute grid dimensions
+    cols = math.ceil(math.sqrt(num_classes))  # Number of columns
+    rows = math.ceil(num_classes / cols)     # Number of rows
+
+    for batch_id in range(batch_size):
+        fig, axes = plt.subplots(rows, cols, figsize=(cols * 4, rows * 3))
+        axes = axes.flatten()  # Flatten axes array for easier indexing
+
+        time_axis = torch.arange(cas[batch_id].shape[0]) * index_to_seconds
+
+        for class_id in range(num_classes):
+            ax = axes[class_id]
+            # Plot CAS values for the class
+            ax.plot(time_axis, cas[batch_id, :, class_id].cpu().numpy(), label=f'Class {class_id}')
+            
+            # Add proposals as shaded regions
+            batch_proposals = proposals[batch_id]
+            proposals_class = batch_proposals[class_id]
+            for proposal in proposals_class:
+                start = proposal[1]  # Time in seconds
+                end = proposal[2]    # Time in seconds
+                threshold = proposal[3]
+                ax.axvspan(start, end, color=clr, alpha=0.3, label='Proposal T: {:2g} S:{:.2g}'.format(threshold, proposal[-1]))
+            
+            ax.set_title(f'Class {class_id}')
+            ax.set_xlabel('Time (s)')
+            ax.set_ylabel('CAS Value')
+            ax.legend()
+        
+        # Hide unused subplots if any
+        for idx in range(num_classes, len(axes)):
+            fig.delaxes(axes[idx])
+
+        fig.suptitle(f'Batch {batch_id}', fontsize=16)
+        plt.tight_layout(rect=[0, 0, 1, 0.95])  # Adjust layout for suptitle
+        plt.show()
+
+        # Wait for the plot window to be closed
+    return
+
+
+# define a proposal function test here
+class TestCasToProposals(unittest.TestCase):
+    def test_cas_to_proposals(self):
+        # Mock inputs
+        cas = torch.rand((5, 100, 9))+0.2 # Example tensor with shape (batch, temporal_length, num_classes)
+        threshold_list = [0.25, 0.5, 0.75]
+        min_proposal_length = 5
+        fps = 30
+        seconds_to_index = fps / 16
+        #score = [[wide_short_scoring, stddev_scoring, median_shift_scoring], [1, 1, 1]]
+        score_simple = [[wide_short_scoring], [1]]
+        # Call the function
+        proposals = cas_to_proposals(cas, threshold_list, min_proposal_length, fps, score_simple)
+        nms_threshold = 0.5
+        filtered_proposals = nms(proposals, nms_threshold, score_simple, seconds_to_index, cas , False)
+        num_props = getProposalItemCount(proposals)
+        num_filtered_props = getProposalItemCount(filtered_proposals)
+        print('Num Proposals {}, filtered {}'.format(getProposalItemCount(proposals), getProposalItemCount(filtered_proposals)))
+        visualize(cas, proposals, fps)
+        visualize(cas, filtered_proposals, fps, 'g')
+        # Assertions
+        self.assertIsInstance(proposals, list)  # Ensure output is a list
+        self.assertEqual(len(proposals), cas.shape[0])  # Ensure batch size matches
+        self.assertGreaterEqual(num_props, num_filtered_props)  # Ensure proposals are generated
+
+
+if __name__ == '__main__':
+    unittest.main()
