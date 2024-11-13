@@ -96,7 +96,7 @@ def cas_to_proposals(cas, threshold_list, min_proposal_length, fps, score_config
     batch = cas.shape[0]
     num_classes = cas.shape[2]
     index_to_seconds = 16 / fps
-    borders = 0.1
+    borders = 0.2
     score_metrics, score_weights = score_config
     proposals = [[] for _ in range(batch)]
     for threshold in threshold_list:
@@ -120,24 +120,25 @@ def cas_to_proposals(cas, threshold_list, min_proposal_length, fps, score_config
                         end = j
                     else:
                         if start != -1: # We already started a proposal
-                            if end - start > min_proposal_length:
+                            if (end - start) > min_proposal_length:
                                 current_length = end - start
-                                wide_start = max(0, start - int(borders * current_length))
-                                wide_end = min(time_length-1, end + int(borders * current_length))
-                                proposal_data = [cas[k,start:end+1,i].cpu().numpy(), cas[k,wide_start:wide_end+1,i].cpu().numpy()]
+                                wide_start = max(0, start - int(borders * current_length) - 1) # factor*length + index_to_seconds offset
+                                wide_end = min(time_length-1, end + int(borders * current_length) + 1)
+                                #print('Short start {} end {} wide start {} wide end {}'.format(start, end, wide_start, wide_end))
+                                proposal_data = [cas[k,start:end,i].cpu().numpy().copy(), cas[k,wide_start:wide_end,i].cpu().numpy().copy()]
                                 batch_proposal[i].append([i, start*index_to_seconds, end*index_to_seconds, threshold, copy.deepcopy(proposal_data)])
                                 #print("Adding Proposal for class {} start {} end {}".format(i, start*index_to_seconds, end*index_to_seconds))
                             # reset start position
                             start = -1
                             end = -1
                 if start != -1: # Finalize the proposal if it continues until the end of class_cas
-                    if time_length - 1 - start > min_proposal_length: # +-1 index error is possible her (Check later.)
+                    if (time_length - 1 - start) > min_proposal_length: # +-1 index error is possible her (Check later.)
                         current_length = time_length - 1 - start
-                        wide_start = max(0, start - int(borders * current_length))
-                        wide_end = min(time_length-1, end + int(borders * current_length))
-                        proposal_data = [cas[k,start:end+1,i].cpu().numpy(), cas[k,wide_start:wide_end+1,i].cpu().numpy()]
+                        wide_start = max(0, start - int(borders * current_length)- 1)
+                        wide_end = min(time_length-1, end + int(borders * current_length) + 1)
+                        proposal_data = [cas[k,start:end,i].cpu().numpy().copy(), cas[k,wide_start:wide_end,i].cpu().numpy().copy()]
                         batch_proposal[i].append([i, start*index_to_seconds, end*index_to_seconds, threshold, copy.deepcopy(proposal_data)])
-                        print("Adding Proposal for class {} start {} end {}".format(i, start*index_to_seconds, end*index_to_seconds))
+                        #print("Adding Proposal for class {} start {} end {}".format(i, start*index_to_seconds, end*index_to_seconds))
             # Now lets score the batch_proposals
             scored_proposals = [[] for _ in range(num_classes)]
             scores = []
@@ -155,45 +156,48 @@ def cas_to_proposals(cas, threshold_list, min_proposal_length, fps, score_config
     return proposals # Proposals is a list with batch, num_classes, proposals
 
 
-def checkMerges(proposal1, proposal2, score_config, t_factor, cas_batch):
+def checkMerges(proposal1, proposal2, score_config, seconds_to_index, cas_batch):
     # Check if the proposals can be merged, if so 
     # calculate the merged score, and if it is better than the individual scores
     # return the merged proposal, otherwise return the original proposal with the highest score
     # proposal is [class_id, start, end, score]
-    class_id1, start1, end1, threshold, score1 = proposal1
-    class_id2, start2, end2, threshold, score2 = proposal2
+    class_id1, start1, end1, threshold1, score1 = proposal1
+    class_id2, start2, end2, threshold2, score2 = proposal2
     # Check if the proposals are of the same class
+    temporal_length = cas_batch.shape[0]
     if class_id1 != class_id2:
         if score1 > score2:
                 return proposal1
         return proposal2
+    cas_class = cas_batch[:, class_id1]
     intersection = max(0, min(end1, end2) - max(start1, start2)) 
     union_start = min(start1, start2)
     union_end = max(end1, end2)
-    union_start_index = int(union_start / t_factor)
-    union_end_index = int(union_end / t_factor)
-    borders = 0.1
+    union_start_index = int(union_start * seconds_to_index)
+    union_end_index = int(union_end * seconds_to_index)
+    borders = 0.2
     len_union = union_end - union_start
-    union_start_index_wide = max(0, union_start_index - int(borders * len_union))
-    union_end_index_wide = min(cas_batch[class_id1].shape[0]-1, union_end_index + int(borders * len_union))
+    union_start_index_wide = max(0, union_start_index - int(borders * len_union) - 1) # correct
+    union_end_index_wide = min(temporal_length-1, union_end_index + int(borders * len_union) + 1) # correct
     # Calculate the union score
     score_metrics, score_weights = score_config
     union_score = 0
-    data = [cas_batch[class_id1][union_start_index:union_end_index+1], cas_batch[class_id1][union_start_index_wide:union_end_index_wide+1]]
-    union_item = [[class_id1, union_start, union_end, data]]
+    data = [cas_batch[union_start_index:union_end_index,class_id1].cpu().numpy(), cas_batch[union_start_index_wide:union_end_index_wide,class_id1].cpu().numpy()]
+    union_threshold = min(threshold1, threshold2)
+    union_item = [[[class_id1, union_start, union_end, union_threshold, data]]]
     score_list = []
-    for i in range(score_metrics):
+    for i in range(len(score_metrics)):
         score_list.append(score_metrics[i](union_item))
     final_scores = combine_scorings(score_list, score_weights)
-    union_score = final_scores[-1][-1]
+    union_score = final_scores[-1][-1][-1]
     if union_score > score1 and union_score > score2: # We got a good merge!
-        return [class_id1, union_start, union_end, union_score]
+        return [class_id1, union_start, union_end, union_threshold, union_score]
     elif score1 > score2:
         return proposal1
     else:
         return proposal2
 
-def nms(proposals, nms_threshold, score_config, t_factor, cas , merging = True):
+def nms(proposals, nms_threshold, score_config, seconds_to_index, cas , merging = True):
     # Sort the proposals based on the normalized score
     # Proposals look like proposal[example_id][class_id] = [class, start, end, score]
     batch_size = len(proposals)
@@ -223,7 +227,7 @@ def nms(proposals, nms_threshold, score_config, t_factor, cas , merging = True):
                     if iou > nms_threshold:
                         overlap = True
                         if(merging): # maybe we can also have a merging threshold
-                            batch_final_proposals[j] = checkMerges(current_proposal, batch_final_proposals[j], score_config, t_factor, cas[batch_id])
+                            batch_final_proposals[j] = checkMerges(current_proposal, batch_final_proposals[j], score_config, seconds_to_index, cas[batch_id])
                         break
                 if not overlap:
                     batch_final_proposals.append(current_proposal) 
@@ -316,7 +320,7 @@ def visualize(cas, proposals, fps, clr='r'):
 class TestCasToProposals(unittest.TestCase):
     def test_cas_to_proposals(self):
         # Mock inputs
-        cas = torch.rand((5, 100, 9))+0.2 # Example tensor with shape (batch, temporal_length, num_classes)
+        cas = torch.rand((20, 100, 9)) # Example tensor with shape (batch, temporal_length, num_classes)
         threshold_list = [0.25, 0.5, 0.75]
         min_proposal_length = 5
         fps = 30
@@ -330,12 +334,63 @@ class TestCasToProposals(unittest.TestCase):
         num_props = getProposalItemCount(proposals)
         num_filtered_props = getProposalItemCount(filtered_proposals)
         print('Num Proposals {}, filtered {}'.format(getProposalItemCount(proposals), getProposalItemCount(filtered_proposals)))
-        visualize(cas, proposals, fps)
-        visualize(cas, filtered_proposals, fps, 'g')
+        #visualize(cas, proposals, fps)
+        #visualize(cas, filtered_proposals, fps, 'g')
         # Assertions
         self.assertIsInstance(proposals, list)  # Ensure output is a list
         self.assertEqual(len(proposals), cas.shape[0])  # Ensure batch size matches
         self.assertGreaterEqual(num_props, num_filtered_props)  # Ensure proposals are generated
+
+    # Lets also adda a test where we check timings of several scoring function sets!
+    def test_score_timing(self):
+        cas = torch.rand((20, 100, 9))
+        threshold_list = [0.25, 0.5, 0.75]
+        min_proposal_length = 5
+        fps = 30
+        seconds_to_index = fps / 16
+        score_wide_short = [[wide_short_scoring], [1]]
+        score_stddev = [[stddev_scoring], [1]]
+        score_median_shift = [[median_shift_scoring], [1]]
+        score_all = [[wide_short_scoring, stddev_scoring, median_shift_scoring], [1, 1, 1]]
+        import time
+        start = time.time()
+        proposals = cas_to_proposals(cas, threshold_list, min_proposal_length, fps, score_wide_short)
+        end = time.time()
+        print('Time taken for wide short scoring is ', end - start)
+        start = time.time()
+        proposals = cas_to_proposals(cas, threshold_list, min_proposal_length, fps, score_stddev)
+        end = time.time()
+        print('Time taken for stddev scoring is ', end - start)
+        start = time.time()
+        proposals = cas_to_proposals(cas, threshold_list, min_proposal_length, fps, score_median_shift)
+        end = time.time()
+        print('Time taken for median shift scoring is ', end - start)
+        start = time.time()
+        proposals = cas_to_proposals(cas, threshold_list, min_proposal_length, fps, score_all)
+        end = time.time()
+        print('Time taken for all scoring is ', end - start)
+        self.assertTrue(True)
+    
+    # Also lets test the time difference between nms with and without merging
+    def test_merge_timing(self):
+        import time
+        cas = torch.rand((20, 100, 9))
+        threshold_list = [0.25, 0.5, 0.75]
+        min_proposal_length = 5
+        fps = 30
+        seconds_to_index = fps / 16
+        score_all = [[wide_short_scoring, stddev_scoring, median_shift_scoring], [1, 1, 1]]
+        proposals = cas_to_proposals(cas, threshold_list, min_proposal_length, fps, score_all)
+        nms_threshold = 0.5
+        start = time.time()
+        filtered_proposals = nms(proposals, nms_threshold, score_all, seconds_to_index, cas , False)
+        end = time.time()
+        print('Time taken for nms without merging is ', end - start)
+        start = time.time()
+        filtered_proposals = nms(proposals, nms_threshold, score_all, seconds_to_index, cas , True)
+        end = time.time()
+        print('Time taken for nms with merging is ', end - start)
+        self.assertTrue(True)
 
 
 if __name__ == '__main__':
