@@ -98,7 +98,8 @@ def cas_to_proposals(cas, threshold_list, min_proposal_length, fps, score_config
     index_to_seconds = 16 / fps
     borders = 0.2
     score_metrics, score_weights = score_config
-    proposals = [[] for _ in range(batch)]
+    #proposals = [[] for _ in range(batch)]
+    proposals = [[[] for _ in range(num_classes)] for _ in range(batch)]
     for threshold in threshold_list:
         cas_thresh = cas >= threshold
         num_positives = torch.sum(cas_thresh, dim=1)
@@ -149,7 +150,10 @@ def cas_to_proposals(cas, threshold_list, min_proposal_length, fps, score_config
             #print('Scores are', scores)
             scored_proposals = combine_scorings(scores, score_weights)
             #print("Scored proposals len ", [np.sum(len(it)) for it in scored_proposals])
-            proposals[k] += scored_proposals # Assign computed proposal for batch k!
+            for m, scored_class in enumerate(scored_proposals):
+                #print('Scored class is ', scored_class)
+                proposals[k][m].extend(scored_class)
+            #proposals[k] += scored_proposals # Assign computed proposal for batch k!
             #print("Prop batch {}, classes {}".format(len(proposals), len(proposals[0])))
             #print("Batch class {}, scored {}".format(len(batch_proposal), len(scored_proposals)))
     #print("Prop batch {}, classes {}".format(len(proposals), len(proposals[0])))
@@ -248,19 +252,16 @@ def actionness_filter_proposals(proposals, actionness, cfg):
     threshold = cfg.ANESS_THRESH
     filtered_proposals = [ [[] for _ in range(num_classes)] for _ in range(num_batch)]
     assert num_batch == len(proposals), "Number of proposals and actionness should match"
-    assert num_classes == len(proposals[0]), "Number of classes in proposals and config should match"
+    assert num_classes == len(proposals[0]), "Number of classes in proposals and config should match {} to {}".format(num_classes,len(proposals[0]))
     #print('Num batches {}, num_classes {}, num_proposals {}'.format(len(proposals), [len(proposals[i]) for i in range(len(proposals))], [len(proposals[0][i]) for i in range(len(proposals[0]))]))
     for batch_id in range(num_batch):
         batch_proposal = proposals[batch_id]
         batch_actionness = actionness[batch_id]
         for class_id in range(len(batch_proposal)):
-            #print("Len of batch proposal ", len(batch_proposal))
-            #print("Batch_prop class ", (batch_proposal[class_id]))
-            for proposal in batch_proposal[class_id]:
-                #print("Prop ", proposal)
+            class_prop = batch_proposal[class_id]
+            for proposal in class_prop:
                 start_frame = int(proposal[1] * seconds_to_index)
                 end_frame = int(proposal[2] * seconds_to_index)
-                #print(" Len {}, start {}, end {}".format(batch_actionness.shape, start_frame, end_frame))
                 actionness_values = batch_actionness[start_frame:end_frame]
                 if np.mean(actionness_values.cpu().numpy()) > threshold:
                     filtered_proposals[batch_id][class_id].append(proposal)
