@@ -9,6 +9,15 @@ import time
 def getProposalItemCount(proposals):
   return sum(len(class_proposals) for batch_proposals in proposals for class_proposals in batch_proposals)
 
+
+def create_proposal(batch_id, class_id, start, end, threshold, cas, index_to_seconds = 16 / 30, borders = 0.2):
+  current_length = end - start
+  wide_start = max(0, start - int(borders * current_length) - 1)
+  wide_end = min(cas.shape[1] - 1, end + int(borders * current_length) + 1)
+  proposal_data = [cas[batch_id, start:end, class_id].cpu().numpy().copy(), cas[batch_id, wide_start:wide_end, class_id].cpu().numpy().copy()]
+  return [class_id, start * index_to_seconds, end * index_to_seconds, threshold, proposal_data]
+
+
 class ScoringFunctions:
   @staticmethod
   def wide_short_scoring(batch_proposals, alpha=0.1): # Scores proposals minus the edges, favoring proposals with sharp edges
@@ -21,6 +30,8 @@ class ScoringFunctions:
         base_data = data[0]
         wide_data = data[-1]
         base_score = np.mean(base_data)
+        if(len(base_data) == len(wide_data)):
+          print('Base data and wide data are same')
         edge_score = (np.sum(wide_data) - np.sum(base_data)) / (len(wide_data) - len(base_data) + 1e-6)
         score = base_score - alpha * edge_score
         scored_proposals[i].append([class_id, start, end, threshold, score])
@@ -97,18 +108,18 @@ class CasToProposals:
         end = j
       else:
         if start != -1 and (end - start) > self.min_proposal_length:
-          batch_proposal.append(self.create_proposal(k, i, start, end, threshold, cas))
+          batch_proposal.append(create_proposal(k, i, start, end, threshold, cas))
         start, end = -1, -1
     if start != -1 and (time_length - 1 - start) > self.min_proposal_length:
-      batch_proposal.append(self.create_proposal(k, i, start, time_length - 1, threshold, cas))
+      batch_proposal.append(create_proposal(k, i, start, time_length - 1, threshold, cas))
     return batch_proposal
-
-  def create_proposal(self, k, i, start, end, threshold, cas):
-    current_length = end - start
-    wide_start = max(0, start - int(self.borders * current_length) - 1)
-    wide_end = min(cas.shape[1] - 1, end + int(self.borders * current_length) + 1)
-    proposal_data = [cas[k, start:end, i].cpu().numpy().copy(), cas[k, wide_start:wide_end, i].cpu().numpy().copy()]
-    return [i, start * self.index_to_seconds, end * self.index_to_seconds, threshold, copy.deepcopy(proposal_data)]
+  
+#  def create_proposal(self, k, i, start, end, threshold, cas):
+#    current_length = end - start
+#    wide_start = max(0, start - int(self.borders * current_length) - 1)
+#    wide_end = min(cas.shape[1] - 1, end + int(self.borders * current_length) + 1)
+#    proposal_data = [cas[k, start:end, i].cpu().numpy().copy(), cas[k, wide_start:wide_end, i].cpu().numpy().copy()]
+#    return [i, start * self.index_to_seconds, end * self.index_to_seconds, threshold, proposal_data]
 
   def cas_to_proposals(self, cas, threshold_list):
     batch = cas.shape[0]
@@ -140,32 +151,28 @@ class NMS:
     self.cas = cas
     self.borders = borders
 
-  def check_and_merge_proposals(self, first_proposal, second_proposal):
+  def check_and_merge_proposals(self, first_proposal, second_proposal, batch_id = 0):
+    score_metrics, score_weights = self.score_config
     class_id1, start1, end1, threshold1, score1 = first_proposal
     class_id2, start2, end2, threshold2, score2 = second_proposal
-    temporal_length = self.cas.shape[0]
     if class_id1 != class_id2:
       if score1 > score2:
         return first_proposal
       return second_proposal
+    
     union_start = min(start1, start2)
     union_end = max(end1, end2)
+    union_threshold = min(threshold1, threshold2)
     union_start_index = int(union_start * self.seconds_to_index)
     union_end_index = int(union_end * self.seconds_to_index)
-    len_union = union_end - union_start
-    union_start_index_wide = max(0, union_start_index - int(self.borders * len_union) - 1)
-    union_end_index_wide = min(temporal_length - 1, union_end_index + int(self.borders * len_union) + 1)
+    
+    proposal_item = create_proposal(batch_id, class_id1, union_start_index, union_end_index,
+                                    union_threshold, self.cas)
 
     # Calculate the union score
-    score_metrics, score_weights = self.score_config
-    data = [self.cas[union_start_index:union_end_index, class_id1].cpu().numpy(),
-        self.cas[union_start_index_wide:union_end_index_wide, class_id1].cpu().numpy()]
-    union_threshold = min(threshold1, threshold2)
-    union_item = [[[class_id1, union_start, union_end, union_threshold, data]]]
-    merged_proposal_item = [[[class_id1, union_start, union_end, union_threshold, data]]]
     score_list = []
     for metric in score_metrics:
-      score_list.append(metric(merged_proposal_item))
+      score_list.append(metric([[proposal_item]])) # Encapsulating in batch,class structure
     final_scores = ScoringFunctions.combine_scorings(score_list, score_weights)
     union_score = final_scores[-1][-1][-1]
     if union_score > score1 and union_score > score2:  # We got a good merge!
@@ -188,7 +195,7 @@ class NMS:
       classed_proposals[class_id].append(proposal)
     return classed_proposals
 
-  def nms(self, proposals, nms_threshold, merging=True):
+  def nms(self, proposals, nms_threshold, merging=False):
     batch_size = len(proposals)
     num_classes = len(proposals[0])
     final_proposals = [[[] for _ in range(num_classes)] for _ in range(batch_size)]
@@ -211,7 +218,7 @@ class NMS:
             if iou > nms_threshold:
               overlap = True
               if merging:
-                batch_final_proposals[j] = self.check_and_merge_proposals(current_proposal, batch_final_proposals[j])
+                batch_final_proposals[j] = self.check_and_merge_proposals(current_proposal, batch_final_proposals[j], batch_id)
                 break
           if not overlap:
             batch_final_proposals.append(current_proposal)
@@ -229,7 +236,7 @@ def actionness_filter_proposals(proposals, actionness, cfg):
   seconds_to_index = cfg.FEATS_FPS / 16
   threshold = cfg.ANESS_THRESH
   filtered_proposals = [ [[] for _ in range(num_classes)] for _ in range(num_batch)]
-  assert num_batch == len(proposals), "Number of proposals and actionness should match"
+  assert num_batch == len(proposals), "Number of proposals and actionness should match {} to {}".format(num_batch, len(proposals))
   assert num_classes == len(proposals[0]), "Number of classes in proposals and config should match {} to {}".format(num_classes,len(proposals[0]))
   for batch_id in range(num_batch):
     batch_proposal = proposals[batch_id]
@@ -247,7 +254,13 @@ def actionness_filter_proposals(proposals, actionness, cfg):
 class ProposalGenie:
   def __init__(self, cfg, score_config):
     self.cfg = cfg
+    if not isinstance(score_config, list):
+      raise ValueError('Score config should be a list')
     self.score_config = score_config
+    # Support for function + string input
+    for i, item in enumerate(self.score_config[0]):
+      if isinstance(item, str): # String support
+        self.score_config[0][i] = eval(item)
     self.min_proposal_length = cfg.MIN_PROPOSAL_LENGTH
     self.fps = cfg.FEATS_FPS
     self.nms_threshold = cfg.NMS_THRESH
@@ -255,14 +268,24 @@ class ProposalGenie:
     self.num_classes = cfg.NUM_CLASSES
     self.seconds_to_index = self.fps / 16
 
-  def generate_proposals(self, cas, threshold_list):
-    proposals = CasToProposals(self.min_proposal_length, self.fps, self.score_config).cas_to_proposals(cas, threshold_list)
-    filtered_proposals = NMS(self.score_config, self.seconds_to_index, cas).nms(proposals, self.nms_threshold, merging=False)
-    return filtered_proposals
+
+  def cas_to_proposals(self, cas):
+    proposals = CasToProposals(self.min_proposal_length, self.fps, self.score_config).cas_to_proposals(cas, self.cfg.CAS_THRESH)
+    return proposals
 
   def filter_proposals(self, proposals, actionness):
     filtered_proposals = actionness_filter_proposals(proposals, actionness, self.cfg)
     return filtered_proposals
+
+  def nms(self, cas, proposals, merging=True):
+    return NMS(self.score_config, self.seconds_to_index, cas).nms(proposals, self.nms_threshold, merging)
+
+  def generate_proposals(self, cas, actionness, merging=True):
+    proposals = self.cas_to_proposals(cas)
+    filtered_proposals = self.filter_proposals(proposals, actionness)
+    nms_proposals = self.nms(cas, filtered_proposals, merging)
+    return nms_proposals
+
 
   @staticmethod
   def visualize(cas, proposals, fps, clr='r'):
@@ -312,6 +335,7 @@ class TestProposalGenie(unittest.TestCase):
     # Mock inputs
     num_classes = 9
     cas = torch.rand((3, 100, num_classes)) # Example tensor with shape (batch, temporal_length, num_classes)
+    actionness = torch.sum(cas, dim=2)
     threshold_list = np.arange(0.1, 0.8, 0.1)
     min_proposal_length = 5
     fps = 30
@@ -326,45 +350,46 @@ class TestProposalGenie(unittest.TestCase):
     cfg.NMS_THRESH = nms_threshold
     cfg.ANESS_THRESH = aness_threshold
     cfg.MIN_PROPOSAL_LENGTH = min_proposal_length
-    
+    cfg.CAS_THRESH = threshold_list
+
     # Initialize ProposalGenie
     genie = ProposalGenie(cfg, score_simple)
     # Generate proposals
-    proposals = genie.generate_proposals(cas, threshold_list)
+    proposals = genie.generate_proposals(cas, actionness)
     num_props = getProposalItemCount(proposals)
     print('Num Proposals {}'.format(num_props))
-    genie.visualize(cas, proposals, fps)    
     # Assertions
     self.assertIsInstance(proposals, list)  # Ensure output is a list
     self.assertEqual(len(proposals), cas.shape[0])  # Ensure batch size matches
 
   def test_filter_proposals(self):
     # Mock inputs
-    num_classes = 9
-    cas = torch.rand((3, 100, num_classes)) # Example tensor with shape (batch, temporal_length, num_classes)
-    threshold_list = np.arange(0.1, 0.8, 0.1)
-    min_proposal_length = 5
-    fps = 30
+    cfg = type('Config', (object,), {
+      'NUM_CLASSES': 9,
+      'FEATS_FPS': 30,
+      'NMS_THRESH': 0.5,
+      'ANESS_THRESH': 0.5,
+      'MIN_PROPOSAL_LENGTH': 5,
+      'CAS_THRESH': np.arange(0.1, 0.8, 0.1)
+    })
+    cas = torch.rand((3, 100, cfg.NUM_CLASSES)) # Example tensor with shape (batch, temporal_length, num_classes)
+    actionness = torch.sum(cas, dim=2)
     score_simple = [[ScoringFunctions.wide_short_scoring], [1]]
-    nms_threshold = 0.5
-    aness_threshold = 0.5
-    actionness = torch.rand((3, 100))  # Example actionness tensor
-    cfg = type('Config', (object,), {})
-    cfg.NUM_CLASSES = num_classes
-    cfg.FEATS_FPS = fps
-    cfg.NMS_THRESH = nms_threshold
-    cfg.ANESS_THRESH = aness_threshold
-    cfg.MIN_PROPOSAL_LENGTH = min_proposal_length
 
     # Initialize ProposalGenie
     genie = ProposalGenie(cfg, score_simple)
-    # Generate and filter proposals
-    proposals = genie.generate_proposals(cas, threshold_list)
+    # Calling each method separately
+    proposals = genie.cas_to_proposals(cas)
     filtered_proposals = genie.filter_proposals(proposals, actionness)
+    nms_proposals = genie.nms(cas, filtered_proposals)
+
     num_props = getProposalItemCount(proposals)
     num_filtered_props = getProposalItemCount(filtered_proposals)
-    print('Num Proposals {}, filtered {}'.format(num_props, num_filtered_props))
-    genie.visualize(cas, filtered_proposals, fps, 'g')
+    num_nms_props = getProposalItemCount(nms_proposals)
+    print('Num Proposals {}, filtered {}, nms {}'.format(num_props, num_filtered_props, num_nms_props))
+    genie.visualize(cas, proposals, cfg.FEATS_FPS)
+    genie.visualize(cas, filtered_proposals, cfg.FEATS_FPS, 'b')
+    genie.visualize(cas, nms_proposals, cfg.FEATS_FPS, 'g')
     
     # Assertions
     self.assertIsInstance(filtered_proposals, list)  # Ensure output is a list
@@ -373,6 +398,7 @@ class TestProposalGenie(unittest.TestCase):
 
   def test_score_timing(self):
     cas = torch.rand((20, 100, 9))
+    actionness = torch.sum(cas, dim=2)
     threshold_list = [0.25, 0.5, 0.75]
     min_proposal_length = 5
     fps = 30
@@ -390,21 +416,22 @@ class TestProposalGenie(unittest.TestCase):
     cfg.NMS_THRESH = nms_threshold
     cfg.ANESS_THRESH = aness_threshold
     cfg.MIN_PROPOSAL_LENGTH = min_proposal_length
+    cfg.CAS_THRESH = threshold_list
 
     start = time.time()
-    proposals = ProposalGenie(cfg, score_wide_short).generate_proposals(cas, threshold_list)
+    proposals = ProposalGenie(cfg, score_wide_short).generate_proposals(cas, actionness)
     end = time.time()
     print('Time taken for wide short scoring is ', end - start)
     start = time.time()
-    proposals = ProposalGenie(cfg, score_stddev).generate_proposals(cas, threshold_list)
+    proposals = ProposalGenie(cfg, score_stddev).generate_proposals(cas, actionness)
     end = time.time()
     print('Time taken for stddev scoring is ', end - start)
     start = time.time()
-    proposals = ProposalGenie(cfg, score_median_shift).generate_proposals(cas, threshold_list)
+    proposals = ProposalGenie(cfg, score_median_shift).generate_proposals(cas, actionness)
     end = time.time()
     print('Time taken for median shift scoring is ', end - start)
     start = time.time()
-    proposals = ProposalGenie(cfg, score_all).generate_proposals(cas, threshold_list)
+    proposals = ProposalGenie(cfg, score_all).generate_proposals(cas, actionness)
     end = time.time()
     print('Time taken for all scoring is ', end - start)
     self.assertTrue(True)
@@ -412,6 +439,7 @@ class TestProposalGenie(unittest.TestCase):
   def test_merge_timing(self):
     import time
     cas = torch.rand((20, 100, 9))
+    actionness = torch.sum(cas, dim=2)
     threshold_list = [0.25, 0.5, 0.75]
     min_proposal_length = 5
     fps = 30
@@ -425,9 +453,11 @@ class TestProposalGenie(unittest.TestCase):
     cfg.NMS_THRESH = nms_threshold
     cfg.ANESS_THRESH = aness_threshold
     cfg.MIN_PROPOSAL_LENGTH = min_proposal_length
+    cfg.CAS_THRESH = threshold_list
 
     genie = ProposalGenie(cfg, score_all)
-    proposals = genie.generate_proposals(cas, threshold_list)
+    proposals = genie.cas_to_proposals(cas)
+    proposals = genie.filter_proposals(proposals, actionness)
     start = time.time()
     filtered_proposals = NMS(score_all, fps / 16, cas).nms(proposals, 0.5, merging=False)
     end = time.time()
