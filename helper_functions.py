@@ -5,6 +5,7 @@ from tslearn.metrics import cdist_dtw
 import torch
 import numpy as np
 import time
+import unittest
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
 import math
@@ -26,7 +27,6 @@ def print_memory_usage(message=""):
 def normalize(video):
   return (video - np.mean(video)) / np.std(video)
 
-
 # Function to calculate the FFT-based distance between two videos using 2D FFT
 def fft_distance_2d(video1, video2, full_conv = True):
   video1 = torch.tensor(video1.reshape(-1, feature_dim))
@@ -36,7 +36,6 @@ def fft_distance_2d(video1, video2, full_conv = True):
   n1, d1 = video1.shape[0], video1.shape[1]
   n2, d2 = video2.shape[0], video2.shape[1]
   assert d1 == d2, "Feature dimensions must match."
-  pad_n = n1
   video1_fft = torch.fft.fft2(video1, dim=0)
   video2_fft = torch.fft.fft2(video2, dim=0)
   fft_mult = torch.fft.ifft2(video1_fft * torch.conj(video2_fft), dim=0)
@@ -99,7 +98,6 @@ def fft_distance_2d_batch(video_batch1, video_batch2, full_conv=True):
   n1, d1 = video_batch1.shape[1], video_batch1.shape[2]
   n2, d2 = video_batch2.shape[1], video_batch2.shape[2]
   assert d1 == d2, "Feature dimensions must match."
-  pad_n = n1
   video_batch1_fft = torch.fft.fft2(video_batch1, dim=1)
   video_batch2_fft = torch.fft.fft2(video_batch2, dim=1)
   fft_mult = torch.fft.ifft2(video_batch1_fft * torch.conj(video_batch2_fft), dim=1)
@@ -156,8 +154,6 @@ def cuda_fft_distances(filenames, data_loader,  feature_size, batch=32):
   distance_matrix = cdist_fft_2d_batched_filenames(filenames, data_loader, batch_size=batch)
   return distance_matrix.to('cpu').numpy()
 
-
-
 def compute_cluster_distances(x, cluster_centers):
   batch_size, temporal_length, feature_dim = x.shape
   centers, cent_length, cent_feature_dim = cluster_centers.shape
@@ -169,67 +165,146 @@ def compute_cluster_distances(x, cluster_centers):
   distances = distances_expanded.view(batch_size, centers, temporal_length).permute(0, 2, 1).to('cuda')
   return distances
 
-def calculate_IoU(proposal, proposal_label):
-  batch_size = len(proposal_label)
-  num_classes = len(proposal_label[0])
-  match_indexes = [[] for _ in range(batch_size)]
-  correspondences = [[] for _ in range(batch_size)]
-  for batch_index in range(batch_size):
-    batch_proposal = proposal[batch_index]
-    batch_label = proposal_label[batch_index]
-    for classf in range(len(batch_proposal)):
-      if len(batch_proposal[classf]) == 0 or len(batch_label[classf]) == 0:
-        continue
-      match_indexes[batch_index].append(classf)
-  current_iou = 0
-  final_average_iou = np.zeros(batch_size)
-  for batch_index in range(batch_size):
-    batch_match = match_indexes[batch_index]
-    batch_label = proposal_label[batch_index]
-    classwise_iou = []
-    for class_index in batch_match:
-      class_proposal = proposal[batch_index][class_index]
-      class_label = proposal_label[batch_index][class_index]
-      class_iou = 0
-      if len(class_proposal) == 0 or len(class_label) == 0:
-        continue
-      for proposal_item in class_proposal:
-        start1, end1 = proposal_item[1], proposal_item[2]
-        best_iou = 0
-        for label_item in class_label:
-          start2, end2 = label_item[1], label_item[2]
-          intersection = max(0, min(end1, end2) - max(start1, start2))
-          union = (end1 - start1) + (end2 - start2) - intersection
-          iou = intersection / union
-          if iou > best_iou:
-            best_iou = iou
-        class_iou += best_iou
-        correspondences[batch_index].append([proposal_item, label_item, best_iou])
-      class_iou = class_iou / len(class_proposal) if len(class_proposal) > 0 else 0
-      classwise_iou.append(class_iou)
-    final_average_iou[batch_index] = np.mean(classwise_iou) if len(classwise_iou) > 0 else 0
-  return final_average_iou, correspondences
 
-def calculate_mAp_from_correspondences(correspondences, num_classes, thresholds):
-  average_mAp = 0
-  mAp_list = []
-  for threshold in thresholds:
-    class_matches = [[] for _ in range(num_classes)]
-    class_precision = np.zeros(num_classes)
-    class_recall = np.zeros(num_classes)
-    for corresp in correspondences:
-      if corresp[2] > threshold:
-        class_matches[corresp[0][0]].append(1)
-      else:
-        class_matches[corresp[0][0]].append(0)
-    class_precision = 0
-    for class_index in range(num_classes):
-      if class_matches[class_index] == []:
+#Iou and mAP calculation below, later we group those into a class!
+
+class OverlapWizard:
+  def __init__(self, batch_size, num_classes):
+    self.correspondences = []
+    self.batch_size = batch_size
+    self.num_classes = num_classes
+
+  def get_potential_matches(self, proposal, proposal_label):
+    batch_size = len(proposal)
+    potential_matches = [[] for _ in range(batch_size)]
+    for batch_index in range(batch_size):
+      batch_proposal = proposal[batch_index]
+      batch_label = proposal_label[batch_index]
+      for classf in range(len(batch_proposal)):
+        if not batch_proposal[classf] or not batch_label[classf]:
+          continue
+        potential_matches[batch_index].append(classf)
+    return potential_matches, np.sum([len(x) for x in potential_matches])
+
+
+  def findBestMatch(self, proposal_item, c_label): # In future drop c_labels after matching. Make it one to one!
+    start1, end1 = proposal_item[1], proposal_item[2]
+    best_iou = 0
+    best_label = None
+    eps = 1e-5
+    for label_item in c_label:
+      start2, end2 = label_item[1], label_item[2]
+      intersection = max(0, min(end1, end2) - max(start1, start2))
+      union = (end1 - start1) + (end2 - start2) - intersection
+      iou = intersection / (union + eps)
+      if iou > best_iou:
+        best_iou = iou
+        best_label = label_item
+    return best_iou, best_label
+  
+  def getMatches(self, potential_matches, b_proposal, b_proposal_label): # batch proposal and batch proposal label
+    classwise_iou = [[0, 0] for _ in range(len(potential_matches))]
+    for class_index in potential_matches:
+      c_proposal = b_proposal[class_index]
+      c_label = b_proposal_label[class_index]
+      if not c_proposal or not c_label:
         continue
-      tp = np.sum(class_matches[class_index])
-      fp = len(class_matches[class_index]) - tp
-      class_precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-    mAp_list.append([np.mean(class_precision), threshold])
-    average_mAp += np.mean(class_precision)
-  average_mAp = average_mAp / len(thresholds)
-  return mAp_list, average_mAp
+      class_iou = 0 
+      for proposal_item in c_proposal:
+        best_iou, best_label = self.findBestMatch(proposal_item, c_label)
+        class_iou += best_iou
+        self.correspondences.append([proposal_item, best_label, best_iou])
+      max_len = max(len(c_proposal), len(c_label))
+      class_iou = class_iou / max_len if max_len > 0 else 0
+      classwise_iou[class_index] = [class_iou, max_len]
+    return classwise_iou
+  
+  def resetCorrespondences(self):
+    self.correspondences = []
+    return
+  
+  def get_classwise_average(self, classwise_iou):
+    sum = 0
+    count = 0
+    for item in classwise_iou:
+      if item[1] == 0:
+        item[0] = 0
+      sum += item[0] * item[1]
+      count += item[1]
+    return sum / count if count > 0 else 0
+
+  def calculate_IoU(self, proposal, proposal_label):
+    # Proposals are of shape (batch_size, num_classes, num_proposals)
+    # And each proposal is of shape [class_index, start, end, threshold, score]
+    self.resetCorrespondences()
+    batch_size = len(proposal_label)
+    if not proposal or not proposal_label:
+      return np.zeros(batch_size), self.correspondences
+
+    potential_matches, max_matches = self.get_potential_matches(proposal, proposal_label)
+    if(max_matches == 0):
+      return np.zeros(batch_size), self.correspondences
+
+    final_average_iou = np.zeros(batch_size)
+    for batch_index in range(batch_size):
+      classwise_iou = self.getMatches(potential_matches[batch_index], proposal[batch_index], proposal_label[batch_index])
+      final_average_iou[batch_index] = self.get_classwise_average(classwise_iou)
+    return final_average_iou, self.correspondences
+
+  def calculate_mAp_from_correspondences(self, thresholds):
+    average_mAp = 0
+    mAp_list = []
+    for threshold in thresholds:
+      class_matches = [[] for _ in range(self.num_classes)]
+      class_precision = np.zeros(self.num_classes)
+      class_recall = np.zeros(self.num_classes) # implement moving on.
+      for corresp in self.correspondences:
+        if corresp[2] > threshold:
+          class_matches[corresp[0][0]].append(1)
+        else:
+          class_matches[corresp[0][0]].append(0)
+      class_precision = 0
+      for class_index in range(self.num_classes):
+        if not class_matches[class_index]:
+          continue
+        tp = np.sum(class_matches[class_index])
+        fp = len(class_matches[class_index]) - tp
+        class_precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+      mAp_list.append([np.mean(class_precision), threshold])
+      average_mAp += np.mean(class_precision)
+    average_mAp = average_mAp / len(thresholds)
+    return mAp_list, average_mAp
+
+# Define a test function to test the above class, you can use unit test
+
+class testOverlapWizard(unittest.TestCase):
+
+  def test_findBestMatch(self):
+    # proposals are of shape (batch_size, num_classes, num_proposals)
+    # and each item is of shape [class_index, start, end, threshold, score]
+    num_classes = 5
+    batch_size = 3
+    thresholds = [0.25, 0.5, 0.75,]
+    proposal = [[[[0, 0, 10, 0.5, 0.8], [0, 10, 20, 0.5, 0.8], [0, 20, 30, 0.5, 0.8]],
+                 [[1, 0, 10, 0.5, 0.8], [1, 10, 20, 0.5, 0.8], [1, 20, 30, 0.5, 0.8]],
+                 [[2, 0, 10, 0.5, 0.8], [2, 10, 20, 0.5, 0.8], [2, 20, 30, 0.5, 0.8]]],
+                 [[] for _ in range(num_classes)],
+                 [[], [], []]]
+    label    = [[[[0, 0, 15, 0.5, 1.8], [0, 10, 25, 0.75, 0.8], [0, 20, 30, 0.75, 0.8]],
+                 [[1, 0, 13, 0.5, 1.8], [1, 10, 25, 0.75, 0.8], [1, 20, 30, 0.75, 0.8]],
+                 [[2, 0, 15, 0.5, 1.8], [2, 15, 20, 0.75, 0.8], [2, 20, 30, 0.75, 0.8]]],
+                 [[] for _ in range(num_classes)],
+                 [[], [], []]]
+    print('Testing Overlap Wizard')
+    ow = OverlapWizard(batch_size, num_classes)
+    average_iou, correspondences = ow.calculate_IoU(proposal, label)
+    print('Average IoU: ', average_iou)
+    print('Correspondences: ', correspondences)
+    mAp_list, average_mAp = ow.calculate_mAp_from_correspondences([0.25, 0.5, 0.75])
+    print('mAp List: ', mAp_list)
+    print('Average mAp: ', average_mAp)
+    return
+  
+if __name__ == '__main__':
+  unittest.main()
+  print('All tests Done')
