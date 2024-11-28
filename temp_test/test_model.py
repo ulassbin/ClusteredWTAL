@@ -93,7 +93,7 @@ def test_all(net, cfg, test_loader, test_info, step):
   net.eval()
   all_correspondences = []
   print_count = 0
-  genie = ProposalGenie(cfg, cfg.score_config)
+  genie = ProposalGenie(cfg, cfg.SCORE_CONFIG)
   ow = OverlapWizard(cfg.TIOU_THRESH, cfg.NUM_CLASSES)
   for data, label, temp_anno, label_proposals, file_name, vid_num_seg in test_loader:
     print_count += 1
@@ -101,20 +101,19 @@ def test_all(net, cfg, test_loader, test_info, step):
     data, label = data.cuda(), torch.tensor(label).cuda()
     vid_num_seg = vid_num_seg[0]
     video_scores, actionness, cas, base_vid_scores, base_actionnes, base_cas, embeddings = net(data) # this works with batch size already
-    proposals = genie.cas_to_proposals(cas, cfg.CAS_THRESH, cfg.MIN_PROPOSAL_LENGTH_INDEXWISE, cfg.FEATS_FPS, genie.config)
+    proposals = genie.cas_to_proposals(cas)
     filtered_proposals = genie.filter_proposals(proposals, actionness)
     nms_proposals = genie.nms(cas, filtered_proposals)
-    
     average_iou, vid_correspondences = ow.calculate_IoU(nms_proposals, label_proposals)
     testLogger.log('Test Progress {}%'.format(print_count/len(test_loader) * 100.0), logging.WARNING)
     testLogger.log("Props: Raw {}, Filtered {}, NMS {}".format(getProposalItemCount(proposals), getProposalItemCount(filtered_proposals), getProposalItemCount(nms_proposals)), logging.WARNING)
     testLogger.log("Batch average iou is {}".format(np.mean(average_iou)), logging.ERROR)
     visualize_cas(cas, actionness)
   mAp_list, average_mAp = ow.calculate_mAp_from_correspondences(cfg.TIOU_THRESH)
-  testLogger.log("Average mAP is {}".format(average_mAP), logging.ERROR)
+  testLogger.log("Average mAP is {}".format(average_mAp), logging.ERROR)
   test_info["step"].append(step)
-  test_info["average_mAP"].append(average_mAP)
-  test_info['mApAll'].append(mAP_list) 
+  test_info["average_mAP"].append(average_mAp)
+  test_info['mApAll'].append(mAp_list)
   return test_info
 
 if __name__ == '__main__':

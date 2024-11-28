@@ -19,6 +19,7 @@ class Simple_Actionness_Module(nn.Module):
             nn.Conv1d(in_channels=self.len_feature, out_channels=2048, kernel_size=3,
                       stride=1, padding=1),
             nn.ReLU()
+            #nn.Tanh()
         )
         # initialize the weights of the embed layer
         nn.init.xavier_uniform_(self.f_embed[0].weight)
@@ -40,7 +41,7 @@ class Simple_Actionness_Module(nn.Module):
         out = self.dropout(out)
         out = self.f_cls(out)
         cas = out.permute(0, 2, 1)
-        actionness = cas.sum(dim=2)
+        actionness, _ = cas.max(dim=2) #cas.sum(dim=2)
         return embeddings, cas, actionness
 
 class ClusterFusion(nn.Module):

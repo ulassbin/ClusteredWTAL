@@ -181,11 +181,11 @@ class OverlapWizard:
       batch_proposal = proposal[batch_index]
       batch_label = proposal_label[batch_index]
       for classf in range(len(batch_proposal)):
+        #print(' Prop {} \n label {}'.format(batch_proposal[classf], batch_label[classf]))
         if not batch_proposal[classf] or not batch_label[classf]:
           continue
         potential_matches[batch_index].append(classf)
     return potential_matches, np.sum([len(x) for x in potential_matches])
-
 
   def findBestMatch(self, proposal_item, c_label): # In future drop c_labels after matching. Make it one to one!
     start1, end1 = proposal_item[1], proposal_item[2]
@@ -201,54 +201,90 @@ class OverlapWizard:
         best_iou = iou
         best_label = label_item
     return best_iou, best_label
-  
-  def getMatches(self, potential_matches, b_proposal, b_proposal_label): # batch proposal and batch proposal label
-    classwise_iou = [[0, 0] for _ in range(len(potential_matches))]
+
+  #def getMatches(self, potential_matches, b_proposal, b_proposal_label): # batch proposal and batch proposal label
+  #  classwise_iou = [[0, 0] for _ in range(self.num_classes)]
+  #  for class_index in potential_matches:
+  #    print('pmatches {}, cindex {}, num_class {}'.format(len(potential_matches), class_index, self.num_classes))
+  #    c_proposal = b_proposal[class_index]
+  #    c_label = b_proposal_label[class_index]
+  #    if not c_proposal or not c_label:
+  #      continue
+  #    class_iou = 0 
+  #    for proposal_item in c_proposal:
+  #      best_iou, best_label = self.findBestMatch(proposal_item, c_label)
+  #      class_iou += best_iou
+  #      self.correspondences.append([proposal_item, best_label, best_iou])
+  #    max_len = max(len(c_proposal), len(c_label))
+  #    class_iou = class_iou / max_len if max_len > 0 else 0
+  #    classwise_iou[class_index] = [class_iou, max_len]
+  #  return classwise_iou
+
+  def getMatches(self, potential_matches, b_proposal, b_proposal_label): # debug version
+    classwise_iou = [[0, 0] for _ in range(self.num_classes)]
+    print("Potential matches:", potential_matches)
+    #print("Batch proposals:", b_proposal)
+    #print("Batch proposal labels:", b_proposal_label)
     for class_index in potential_matches:
-      c_proposal = b_proposal[class_index]
-      c_label = b_proposal_label[class_index]
-      if not c_proposal or not c_label:
-        continue
-      class_iou = 0 
-      for proposal_item in c_proposal:
-        best_iou, best_label = self.findBestMatch(proposal_item, c_label)
-        class_iou += best_iou
-        self.correspondences.append([proposal_item, best_label, best_iou])
-      max_len = max(len(c_proposal), len(c_label))
-      class_iou = class_iou / max_len if max_len > 0 else 0
-      classwise_iou[class_index] = [class_iou, max_len]
+        print('Processing class_index:', class_index)
+        c_proposal = b_proposal[class_index]
+        c_label = b_proposal_label[class_index]
+        if not c_proposal or not c_label:
+            print(f"Skipping class_index {class_index}: c_proposal empty: {not c_proposal}, c_label empty: {not c_label}")
+            continue
+        class_iou = 0
+        for proposal_item in c_proposal:
+            best_iou, best_label = self.findBestMatch(proposal_item, c_label)
+            print(f"Proposal item: {proposal_item}, Best IOU: {best_iou}, Best label: {best_label}")
+            class_iou += best_iou
+            self.correspondences.append([proposal_item, best_label, best_iou])
+        max_len = max(len(c_proposal), len(c_label))
+        if max_len > 0:
+            class_iou = class_iou / max_len
+        else:
+            print(f"Warning: max_len is 0 for class_index {class_index}")
+            class_iou = 0
+        print(f"Class Index: {class_index}, Class IOU: {class_iou}, Max Length: {max_len}")
+        classwise_iou[class_index] = [class_iou, max_len]
     return classwise_iou
-  
+
   def resetCorrespondences(self):
     self.correspondences = []
     return
-  
-  def get_classwise_average(self, classwise_iou):
+
+  def get_classwise_average(self, classwise_iou): # work on this!!
     sum = 0
     count = 0
-    for item in classwise_iou:
-      if item[1] == 0:
-        item[0] = 0
-      sum += item[0] * item[1]
-      count += item[1]
-    return sum / count if count > 0 else 0
+    for class_iou, max_len in classwise_iou:
+      curr_iou = class_iou
+      if max_len == 0:
+        curr_iou = 0
+      sum += curr_iou * max_len
+      count += max_len
+    print('Count ', count)
+    return sum / count if count > 0 else 0 # get back to here. -1 is just an indicator
 
   def calculate_IoU(self, proposal, proposal_label):
     # Proposals are of shape (batch_size, num_classes, num_proposals)
     # And each proposal is of shape [class_index, start, end, threshold, score]
     self.resetCorrespondences()
+    assert len(proposal) == len(proposal_label), 'batch sizes for proposals dont match'
     batch_size = len(proposal_label)
     if not proposal or not proposal_label:
+      print('Empty prop {} or label {}'.format(len(proposal), len(proposal_label)))
       return np.zeros(batch_size), self.correspondences
 
     potential_matches, max_matches = self.get_potential_matches(proposal, proposal_label)
     if(max_matches == 0):
+      print('Potential matches is zero')
       return np.zeros(batch_size), self.correspondences
 
     final_average_iou = np.zeros(batch_size)
+    print('Batch size here is ', batch_size)
     for batch_index in range(batch_size):
       classwise_iou = self.getMatches(potential_matches[batch_index], proposal[batch_index], proposal_label[batch_index])
       final_average_iou[batch_index] = self.get_classwise_average(classwise_iou)
+      print('Batch {} Class wise IoU \n {}'.format(batch_index, classwise_iou))
     return final_average_iou, self.correspondences
 
   def calculate_mAp_from_correspondences(self, thresholds):
@@ -276,7 +312,6 @@ class OverlapWizard:
     return mAp_list, average_mAp
 
 # Define a test function to test the above class, you can use unit test
-
 class testOverlapWizard(unittest.TestCase):
 
   def test_findBestMatch(self):

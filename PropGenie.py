@@ -14,6 +14,8 @@ def create_proposal(batch_id, class_id, start, end, threshold, cas, index_to_sec
   current_length = end - start
   wide_start = max(0, start - int(borders * current_length) - 1)
   wide_end = min(cas.shape[1] - 1, end + int(borders * current_length) + 1)
+  #print('Cas shape ', cas.shape)
+  #print('S {} e{} - ws{} we{} - max {}'.format(start,end,wide_start,wide_end,cas.shape[1]-1))
   proposal_data = [cas[batch_id, start:end, class_id].cpu().numpy().copy(), cas[batch_id, wide_start:wide_end, class_id].cpu().numpy().copy()]
   return [class_id, start * index_to_seconds, end * index_to_seconds, threshold, proposal_data]
 
@@ -30,8 +32,8 @@ class ScoringFunctions:
         base_data = data[0]
         wide_data = data[-1]
         base_score = np.mean(base_data)
-        if(len(base_data) == len(wide_data)):
-          print('Base data and wide data are same')
+        #if(len(base_data) == len(wide_data)):
+        #  print('Base data and wide data are same {}  cid {} thresh {}'.format(len(base_data), class_id, threshold))
         edge_score = (np.sum(wide_data) - np.sum(base_data)) / (len(wide_data) - len(base_data) + 1e-6)
         score = base_score - alpha * edge_score
         scored_proposals[i].append([class_id, start, end, threshold, score])
