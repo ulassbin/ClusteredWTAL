@@ -92,22 +92,100 @@ def plot_comparison(convolution_result, shifted_sum_result):
 def normalize(video_batch):
   return (video_batch - video_batch.mean(dim=(1,2), keepdim=True)) / video_batch.std(dim=(1,2), keepdim=True)
 
+# Initial version
+""" def fft_distance_2d_batch(video_batch1, video_batch2, full_conv=True):
+    # Normalize the inputs
+    video_batch1 = F.normalize(video_batch1, dim=2)
+    video_batch2 = F.normalize(video_batch2, dim=2)
+    # Perform 1D FFT on the temporal dimension
+    video_batch1_fft = torch.fft.fft(video_batch1, dim=1)  # FFT along temporal dimension
+    video_batch2_fft = torch.conj(torch.fft.fft(video_batch2, dim=1))
+    print_memory_usage('After FFT transformation of vids')
+    # Element-wise multiplication and inverse FFT
+    fft_mult = torch.fft.ifft(video_batch1_fft * video_batch2_fft, dim=1)
+    print_memory_usage('After ifft')
+    convolution_result = torch.real(fft_mult).sum(dim=2)  # Sum over feature dimension
+    print_memory_usage('After real sum')
+
+    if not full_conv:
+        # Take the peak values
+        peak_values = torch.amax(convolution_result, dim=1, keepdim=True)
+        distances = 1 / (peak_values + 1e-10)
+    else:
+        distances = 1 / (convolution_result + 1e-10)
+    print('Distances shape {}, type {}'.format(distances.shape, type(distances))
+    return distances """
+
+# optimized version (Half precision and real fft)
 def fft_distance_2d_batch(video_batch1, video_batch2, full_conv=True):
-  video_batch1 = F.normalize(video_batch1, dim=2)
-  video_batch2 = F.normalize(video_batch2, dim=2)
-  n1, d1 = video_batch1.shape[1], video_batch1.shape[2]
-  n2, d2 = video_batch2.shape[1], video_batch2.shape[2]
-  assert d1 == d2, "Feature dimensions must match."
-  video_batch1_fft = torch.fft.fft2(video_batch1, dim=1)
-  video_batch2_fft = torch.fft.fft2(video_batch2, dim=1)
-  fft_mult = torch.fft.ifft2(video_batch1_fft * torch.conj(video_batch2_fft), dim=1)
-  convolution_result = torch.real(fft_mult).sum(dim=2)
-  if not full_conv:
-    peak_values = torch.amax(convolution_result)
-    distances = 1 / (peak_values + 1e-10)
-  else:
-    distances = 1 / (convolution_result + 1e-10)
-  return distances
+    # Normalize the inputs
+    # clip the temporal dimension to 2048
+    print('Video batch 1 shape {}, video batch 2 shape {}'.format(video_batch1.shape, video_batch2.shape))
+    temporal_length_a = video_batch1.shape[1]
+    temp_length = video_batch1.shape[1]
+    video_batch1 = F.normalize(video_batch1, dim=2)
+    video_batch2 = F.normalize(video_batch2, dim=2)
+    video_batch1 = video_batch1[:, :2048, :].half() # clip the temporal dimension to 2048
+    video_batch2 = video_batch2[:, :2048, :].half() # clip the temporal dimension to 2048 for now.
+    #video_batch1 = F.normalize(video_batch1, dim=2).half()
+    #video_batch2 = F.normalize(video_batch2, dim=2).half()
+    # Perform 1D FFT on the temporal dimension
+    video_batch1_fft = torch.fft.rfft(video_batch1, dim=1)  # FFT along temporal dimension
+    video_batch2_fft = torch.fft.rfft(video_batch2, dim=1)
+    print_memory_usage('After FFT transformation of vids')
+    # Element-wise multiplication and inverse FFT
+    fft_mult = torch.fft.irfft(video_batch1_fft * video_batch2_fft, dim=1) # guaranteed to be real
+    print_memory_usage('After ifft')
+    convolution_result = torch.real(fft_mult).sum(dim=2)  # Sum over feature dimension
+    print_memory_usage('After real sum')
+    # pad distances to original temp_length
+    convolution_result = F.pad(convolution_result, (0, temp_length - 2048), 'constant', 0)
+    if not full_conv:
+        # Take the peak values
+        peak_values = torch.amax(convolution_result, dim=1, keepdim=True)
+        distances = 1 / (peak_values + 1e-10)
+    else:
+        distances = 1 / (convolution_result + 1e-10)
+    mean = torch.mean(distances)
+    nans = torch.isnan(distances).sum().item()
+    print('Mean distances {} nans {}'.format(mean, nans))
+    distances = F.pad(distances, (0, temporal_length_a - distances.shape[1]), 'constant', 0).float()
+    print('Distances shape {}, type {}'.format(distances.shape, distances.dtype))
+    return distances
+
+# from test
+
+def fft_distance_2d_batch(video_batch1, video_batch2, full_conv=True):
+    # get the original shapes
+    temporal_length_a = video_batch1.shape[1]
+    video_batch1 = video_batch1[:, :2048, :] # clip the temporal dimension to 2048
+    video_batch2 = video_batch2[:, :2048, :] # clip the temporal dimension to 2048 for now.
+    #video_batch1 = F.normalize(video_batch1, dim=2).half()
+    #video_batch2 = F.normalize(video_batch2, dim=2).half()
+    video_batch1_fft = torch.fft.rfft(video_batch1, dim=1)
+    print('Vid shape {} fft shape {}'.format(video_batch1.shape, video_batch1_fft.shape))
+    print('Vid type {} fft type {}'.format(video_batch1.dtype, video_batch1_fft.dtype))
+    video_batch2_fft = torch.fft.rfft(video_batch2, dim=1)
+    print_memory_usage('After FFT transformation of vids')
+    del video_batch1, video_batch2
+    print_memory_usage('After deleting vids')
+    fft_mult = torch.fft.irfft(video_batch1_fft * video_batch2_fft, dim=1) # result guaranteed to be real
+    print_memory_usage('After ifft')
+    convolution_result = fft_mult.sum(dim=2)
+    print_memory_usage('After convolution sum')
+    if not full_conv:
+        peak_values = torch.amax(convolution_result, dim=1, keepdim=True)
+        distances = 1 / (peak_values + 1e-10)
+    else:
+        distances = 1 / (convolution_result + 1e-10)
+    # pad distances the axis 1 to the original shape
+    mean = torch.mean(distances)
+    print('Mean distances', mean)
+    nans = torch.isnan(distances).sum().item()
+    print('Nans ', nans)
+    distances = F.pad(distances, (0, temporal_length_a - distances.shape[1]), 'constant', 0)
+    return distances
+
 
 def cdist_fft_2d_batched(videos, batch_size=32, full_conv=False):
   num_videos = len(videos)
@@ -161,9 +239,21 @@ def compute_cluster_distances(x, cluster_centers):
   assert feature_dim == cent_feature_dim, "Feature dimensions must match between x and cluster centers."
   x_expanded = x.unsqueeze(1).expand(batch_size, centers, temporal_length, feature_dim).reshape(-1, temporal_length, feature_dim)
   cluster_centers_expanded = cluster_centers.unsqueeze(0).expand(batch_size, centers, temporal_length, feature_dim).reshape(-1, temporal_length, feature_dim)
-  distances_expanded = fft_distance_2d_batch(x_expanded, cluster_centers_expanded)
-  distances = distances_expanded.view(batch_size, centers, temporal_length).permute(0, 2, 1).to('cuda')
-  return distances
+  print_memory_usage('After expanding')
+  torch.cuda.empty_cache()
+  #with torch.profiler.profile(
+  #    activities=[torch.profiler.ProfilerActivity.CUDA],
+  #    on_trace_ready=torch.profiler.tensorboard_trace_handler('./log')
+  #) as prof:
+  with torch.no_grad():
+    distances = fft_distance_2d_batch(x_expanded, cluster_centers_expanded)
+  # Call the profiler's summary after the `with` block
+  #print(prof.key_averages().table(sort_by="cuda_memory_usage", row_limit=10))
+
+
+  #distances = fft_distance_2d_batch(x_expanded, cluster_centers_expanded)
+  print_memory_usage('After fft_dist')
+  return distances.view(batch_size, temporal_length, centers).to('cuda')
 
 
 #Iou and mAP calculation below, later we group those into a class!

@@ -20,7 +20,7 @@ def set_seed(seed):
 
 
 class NpyFeature(data.Dataset):
-    def __init__(self, data_path, mode, modal, feature_fps, num_segments, sampling, class_dict, seed=-1, supervision='weak', len_override=None):
+    def __init__(self, data_path, mode, modal, feature_fps, num_segments, sampling, class_dict, seed=-1, supervision='weak', len_override=None, quick_run=False):
         if seed >= 0:
             set_seed(seed)
 
@@ -31,6 +31,7 @@ class NpyFeature(data.Dataset):
         self.feature_dim =[]
         self.padded_data = []
         self.padded_names = []
+        self.quick_run = quick_run
 
         if self.modal == 'all':
             self.feature_path = []
@@ -47,8 +48,13 @@ class NpyFeature(data.Dataset):
         split_path = os.path.join(data_path, 'split_{}.txt'.format(self.mode))
         split_file = open(split_path, 'r')
         self.vid_list = []
+        count = 0
         for line in split_file:
             self.vid_list.append(line.strip())
+            if(self.quick_run):
+                count += 1
+                if(count > 10):
+                    break
         self.num_videos = len(self.vid_list)
         split_file.close()
         logger.log('=> {} set has {} videos'.format(mode, len(self.vid_list)), logging.WARNING)
@@ -151,7 +157,8 @@ class NpyFeature(data.Dataset):
 
         for _anno in anno_list:
             label[self.class_name_to_idx[_anno['label']]] = 1
-            classwise_anno[self.class_name_to_idx[_anno['label']]].append(_anno)
+            class_index = self.class_name_to_idx[_anno['label']]
+            classwise_anno[class_index].append(_anno)
 
         temp_anno = np.zeros([vid_length, self.num_classes])
         seconds_to_index = self.feature_fps / 16 # Since every frame is actually 16 frames because of the feature extraction
@@ -179,27 +186,25 @@ class NpyFeature(data.Dataset):
         anno_list = self.anno['database'][vid_name]['annotations']
         label = np.zeros([self.num_classes], dtype=np.float32)
 
-        classwise_anno = [[] for _ in range(self.num_classes) ]
+        classwise_anno = [[] for _ in range(self.num_classes)]
         proposal_labels = [[] for _ in range(self.num_classes)]
+        temp_anno = np.zeros([video_length, self.num_classes])
+        seconds_to_index = self.feature_fps / 16
         for _anno in anno_list:
-            label[self.class_name_to_idx[_anno['label']]] = 1
-            classwise_anno[self.class_name_to_idx[_anno['label']]].append(_anno)
-            temp_anno = np.zeros([video_length, self.num_classes]) # Full vid length num_classes dim array
-            seconds_to_index = self.feature_fps / 16
-
-            for class_idx in range(self.num_classes):
-                if label[class_idx] != 1:
-                    continue
-
-                for _anno in classwise_anno[class_idx]: # Maybe we can do this in a higher resolution next time!
-                    tmp_start_sec = float(_anno['segment'][0])
-                    tmp_end_sec = float(_anno['segment'][1])
-                    tmp_start = round(tmp_start_sec * seconds_to_index) # we can generate more cells somehow...
-                    tmp_end = round(tmp_end_sec * seconds_to_index)
-                    temp_anno[tmp_start:tmp_end+1, class_idx] = 1
-                    # Add as proposal labels too (in the form of [class, start, end, score, normalized_score]) so we dont lose critical time information
-                    # Keep the score and normalized score = 1 for labels ofc
-                    proposal_labels[class_idx].append([class_idx, tmp_start, tmp_end, 1, 1])
+            class_index = self.class_name_to_idx[_anno['label']]
+            label[class_index] = 1
+            classwise_anno[class_index].append(_anno)
+        
+        for class_idx in range(self.num_classes):
+          for _anno in classwise_anno[class_idx]: # Maybe we can do this in a higher resolution next time!
+              tmp_start_sec = float(_anno['segment'][0])
+              tmp_end_sec = float(_anno['segment'][1])
+              tmp_start = round(tmp_start_sec * seconds_to_index) # we can generate more cells somehow...
+              tmp_end = round(tmp_end_sec * seconds_to_index)
+              temp_anno[tmp_start:tmp_end+1, class_idx] = 1
+              # Add as proposal labels too (in the form of [class, start, end, score, normalized_score]) so we dont lose critical time information
+              # Keep the score and normalized score = 1 for labels ofc
+              proposal_labels[class_idx].append([class_idx, tmp_start, tmp_end, 1, 1])
 
 
         

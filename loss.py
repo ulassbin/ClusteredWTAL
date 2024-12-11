@@ -43,6 +43,10 @@ class AutoLabelClusterCrossEntropyLoss(nn.Module):
     self.ce_criterion = nn.CrossEntropyLoss()
 
   def forward(self, embeddings, cluster_centroids):
+    print('Embeddings shape {}, cluster centroids shape {}'.format(embeddings.shape, cluster_centroids.shape))
+    embded_nan = torch.isnan(embeddings).sum().item()
+    cluster_nan = torch.isnan(cluster_centroids).sum().item()
+    print('Embeddings nan {}, cluster centroids nan {}'.format(embded_nan, cluster_nan))
     distances_to_clusters = torch.cdist(embeddings, cluster_centroids)  # (batch_size, num_clusters)
     labels = torch.argmin(distances_to_clusters, dim=1)  # Labels are the indices of the closest clusters
     logits = -distances_to_clusters  # (batch_size, num_clusters)
